@@ -1,0 +1,1001 @@
+==========================================================================
+PARC Instruction Set Architecture
+==========================================================================
+# Author : Ji Kim
+# Date   : August 22, 2011
+
+The PARC ISA is a subset of the MIPS32 ISA with some modifications to
+match the PARC architecture. It is categorized into four versions, each of
+which builds off of the previous version as it increases in complexity. It
+has several differences from MIPS32, in addition to having a different
+coprocessor 0 (cp0) register space. A system that implements the full PARC
+ISA will be able to run parallel C++ programs on a multicore architecture.
+
+ Table of Contents
+   1. Differences from MIPS32
+   2. Architectural State
+   3. Network Message Interface
+   4. PARC ISA Overview
+     4.1 PARCv1
+     4.2 PARCv2
+     4.3 PARCv3
+     4.4 PARCv4
+
+--------------------------------------------------------------------------
+1. Differences from MIPS32
+--------------------------------------------------------------------------
+
+The PARC ISA has several important differences from the MIPS32 ISA.
+
+* Little-Endian
+
+Although MIPS32 supports both big- and little-endian architectures, the
+PARC ISA is strictly little-endian. This means that the least significant
+bytes in a word are stored in the lower order addresses in memory.
+
+* No branch delay slot
+
+This means that link address for jal/jalr instructions needs to be PC + 4
+not PC + 8. Technically, without a branch delay slot there is no reason to
+keep using PC + 4 for the PC relative branch and jump targets, but it
+simplifies the compiler so for now the following instructions all use PC +
+4 as tbe base address for determining their target: jal, jalr, bne, beq,
+blez, btz, bltz, and bgez.
+
+* No HI/LO registers
+
+MIPS32 uses HI and LO registers to store the 64-bit results of mult,
+multu, div, and divu instructions. The PARC ISA has its own set of
+multiply/divide instructions: mul, div, divu, rem, and remu which all
+target a general purpose register. The PARC ISA does not have HI and LO
+registers. The multiply instruction only has a signed variant, whereas the
+divide and remainder instructions have both a signed and unsigned variant.
+Notice that the names for div and divu are the same but the functionality
+is different. The PARC multiply/divide/remainder instructions always
+return a 32-bit result into a general purpose register -- this means that
+mul will only return the lower half of the 64-bit product as the result.
+
+* Atomic instructions
+
+PARC support atomic instructions in PARCv4. Atomic instructions embody
+multiple operations that complete atomically with respect to other memory
+operations. Atomic instructions are important in multicore systems for
+efficient synchronization.
+
+* Address translation
+
+PARC does not yet have a virtual memory space, thus does not use any
+address translation to access memory. Memory addresses used by
+processor requests are essentially direct mappings to the physical
+memory, except that the higher order bits are truncated to the length
+of the physical memory address.
+
+* Other features not included from MIPS32
+
+  - Branch likely instructions (b*l)
+  - Branch and link instructions (b*al)
+  - Test and trap instructions (teq, tge, tlt, ...)
+  - Unaligned loads and stores (lwl, lwr, swl, swr)
+  - Merged multiply accumulates (madd, maddu, msub, msubu)
+  - Rotate instructions (rotr, rotrv)
+  - Bit manipulation instructions (clz, clo, ext, ins, seb, seh)
+  - Load-link and store-conditional instructions (ll, sc)
+
+--------------------------------------------------------------------------
+2. Architectural State
+--------------------------------------------------------------------------
+
+* General Purpose Registers
+
+  - 32 GPRs: PARC uses slightly different symbolic register names than
+    MIPS32. The exact mapping is shown below. Notice that $at is moved to
+    r30 and that the additional argument registers are overlapped with
+    the first few temporary registers.
+
+    Zero Register:
+      - r0  : $zero
+
+    Function Result Registers:
+      - r1  : $v0
+      - r2  : $v1
+
+    Function Argument Registers:
+      - r3  : $a0
+      - r4  : $a1
+      - r5  : $a2
+      - r6  : $a3
+
+    Temporary Registers (overlap with argument registers):
+      - r7  : $t0/$a4
+      - r8  : $t1/$a5
+      - r9  : $t2/$a6
+      - r10 : $t3/$a7
+      - r11 : $t4
+      - r12 : $t5
+      - r13 : $t6
+      - r14 : $t7
+      - r15 : $t8
+      - r16 : $t9
+
+    Saved Registers:
+      - r17 : $s0
+      - r18 : $s1
+      - r19 : $s2
+      - r20 : $s3
+      - r21 : $s4
+      - r22 : $s5
+      - r23 : $s6
+      - r24 : $s7
+      - r25 : $s8/$fp
+
+    Kernel Registers:
+      - r26 : $k0
+      - r27 : $k1
+
+    Global Pointer:
+      - r28 : $gp
+
+    Stack Pointer:
+      - r29 : $sp
+
+    Assembler Temporary:
+      - r30 : $at
+
+    Return Address:
+      - r31 : $ra
+
+* Coprocessor 0 Registers
+
+  - stats_en: statistics register, cpr10 (PARCv1 and higher)
+    - Used to enable or disable the statistics tracking feature of the
+      processor (i.e. counting cycles and instructions)
+  - epc: exception PC, cpr14 (PARCv3 and higher)
+    - Stores return address from exception
+  - status: status register, cpr21 (PARCv1 and higher)
+    - Used to communicate results of assembly tests and raw C programs
+      for all PARC versions.
+  - nsend: network send register, cpr22 (PARCv3 and higher)
+    - Used as a send buffer for outbound messages to the network
+  - nrecv: network receive register, cpr23 (PARCv3 and higher)
+    - Used as a receive buffer for inbound messages from the network
+  - core_id: cpr17
+  - num_cores: cpr19
+
+* Reset Vector
+
+  - The reset vector for PARC points to the memory address 0x00000400,
+    which is where assembly tests should reside, as well as user code in
+    PARCv2, and the kernel bootstrap code for PARCv3 and higher.
+
+--------------------------------------------------------------------------
+3. Network Message Interface
+--------------------------------------------------------------------------
+
+PARC uses a 2-register messaging interface to communicate with the
+network. These are the nsend and nrecv registers in coprocessor 0. Every
+outbound message must be prefaced by writing the length of the message in
+bytes and the destination to the nsend register using the mtc0
+instruction. The format of the header message is shown here.
+
+  31                    16 15                     0
+ +------------------------+------------------------+
+ |          len           |          dest          |
+ |                        |                        |
+ +------------------------+------------------------+
+
+The kernel is responsible for constructing the header message. Inbound
+messages are read from the nrecv register in coprocessor 0 by using the
+mfc0 instruction. Every inbound message is also prefaced by the same
+header with the length of the message and the source of the message.
+
+--------------------------------------------------------------------------
+4. PARC ISA Overview
+--------------------------------------------------------------------------
+
+Here is a brief list of the instructions which make up each version of
+the PARC ISA.
+
+* PARCv1: simplest subset in order to run assembly tests
+
+  - addiu, ori, lui
+  - addu
+  - lw, sw
+  - jal, jr
+  - bne
+  - mtc0
+
+* PARCv2: simplest subset in order to run raw C code (no syscalls)
+
+  - andi, xori, slti, sltiu
+  - sll, srl, sra
+  - sllv, srlv, srav
+  - and, or, xor, nor, slt, sltu
+  - mul, div, divu, rem, remu
+
+  - lb, lbu, lh, lhu, sb, sh
+
+  - j, jalr
+  - beq, blez, bgtz, bltz, bgez
+
+* PARCv3: instructions needed to run C++ code with syscalls
+
+  - mfc0
+  - syscall, eret
+
+* PARCv4: multicore support
+
+  - amo.add, amo.and, amo.or (atomic instructions)
+  - sync (memory fence)
+
+--------------------------------------------------------------------------
+4.1 PARCv1
+--------------------------------------------------------------------------
+
+PARCv1 contains a subset of instructions of the full PARC ISA that can run
+assembly tests. The results of tests are conveyed to the host by using the
+mtc0 instruction to set the coprocessor 0 status register, cpr21, with a 1
+if the test passes or the line number at which the test failed if the test
+fails (which must be greater than 1).
+
+* addiu
+
+ - Summary     : Add constant with no overflow exception
+ - Assembly    : addiu r_dst, r_src, n_val
+ - Description : R[r_dst] = R[r_src] + n_val
+ - Format      : imm
+
+  31    26 25   21 20   16 15                     0
+ +--------+-------+-------+------------------------+
+ |   op   |  rs   |  rt   |         immed          |
+ | 001001 | src   | dst   |         val            |
+ +--------+-------+-------+------------------------+
+
+The 'unsigned' keyword in the instruction name is a misnomer in most
+cases. The 'unsigned' variant of an instruction simply means that the
+operation will not trap on an overflow and does *not* imply that operands
+will be treated as unsigned values. The exceptions to this are the mul/div
+instructions, included in PARCv2. The PARC ISA, in general, does not
+support any instructions that use traps.
+
+* ori
+
+ - Summary     : Bitwise logical OR with constant
+ - Assembly    : ori r_dst, r_src, n_val
+ - Description : R[r_dst] = R[r_src] | n_val
+ - Format      : imm
+
+  31    26 25   21 20   16 15                     0
+ +--------+-------+-------+------------------------+
+ |   op   |  rs   |  rt   |         immed          |
+ | 001101 | src   | dst   |         val            |
+ +--------+-------+-------+------------------------+
+
+* lui
+
+ - Summary     : Load constant into upper half of word
+ - Assembly    : lui r_dst, n_val
+ - Description : R[r_dst] = n_val << 16
+ - Format      : imm
+
+  31    26 25   21 20   16 15                     0
+ +--------+-------+-------+------------------------+
+ |   op   |       |  rt   |         immed          |
+ | 001111 | 00000 | dst   |         val            |
+ +--------+-------+-------+------------------------+
+
+* addu
+
+ - Summary     : Signed addition with 3 GPRs, no overflow exception
+ - Assembly    : addu r_dst, r_src0, r_src1
+ - Description : R[r_dst] = R[r_src0] + R[r_src1]
+ - Format      : arith
+
+  31    26 25   21 20   16 15   11 10    6 5      0
+ +--------+-------+-------+-------+-------+--------+
+ |   op   |  rs   |  rt   |  rd   |       |  cmd   |
+ | 000000 | src0  | src1  | dst   | 00000 | 100001 |
+ +--------+-------+-------+-------+-------+--------+
+
+* lw
+
+ - Summary     : Load word from memory as signed value
+ - Assembly    : lw r_dst, n_offset(r_base)
+ - Description : R[r_dst] = M[ R[r_base] + n_offset ]
+ - Format      : mem
+
+  31    26 25   21 20   16 15                     0
+ +--------+-------+-------+------------------------+
+ |   op   |  rs   |  rt   |         immed          |
+ | 100011 | base  | dst   |         offset         |
+ +--------+-------+-------+------------------------+
+
+* sw
+
+ - Summary     : Store word into memory
+ - Assembly    : sw r_src, n_offset(r_base)
+ - Description : M[ R[r_base] + n_offset ] = R[r_src]
+ - Format      : mem
+
+  31    26 25   21 20   16 15                     0
+ +--------+-------+-------+------------------------+
+ |   op   |  rs   |  rt   |         immed          |
+ | 101011 | base  | src   |         offset         |
+ +--------+-------+-------+------------------------+
+
+* jal
+
+ - Summary     : Jump to address and place return address in GPR 31
+ - Assembly    : jal n_targ
+ - Description : R[31] = PC + 4, PC_next = n_targ << 2
+ - Format      : br
+
+  31    26 25                                     0
+ +--------+----------------------------------------+
+ |   op   |                 immed                  |
+ | 000011 |                 targ                   |
+ +--------+----------------------------------------+
+
+The return address should be the instruction immediately following the
+branch instruction. Keep in mind that this is different from the MIPS ISA
+in which the return address is 2 instructions after the branch instruction
+to account for the branch delay slot. n_targ is shifted to the left by 2
+bits and the resulting 28 bits are combined with the 4 msb of the current
+PC to generate the effective target address.
+
+* jr
+
+ - Summary     : Jump to address in register
+ - Assembly    : jr r_src
+ - Description : PC_next = R[r_src]
+ - Format      : br
+
+  31    26 25   21 20           11 10    6 5      0
+ +--------+-------+---------------+-------+--------+
+ |   op   |  rs   |               |       |  cmd   |
+ | 000000 | src   |  0000000000   | 00000 | 001000 |
+ +--------+-------+---------------+-------+--------+
+
+* bne
+
+ - Summary     : Branch to target address offset from PC if 2 GPRs are not equal
+ - Assembly    : bne r_src0, r_src1, n_offset
+ - Description : if ( R[r_src0] != R[r_src1] ) PC_next = PC + 4 + ( n_offset << 2 )
+ - Format      : br
+
+  31    26 25   21 20   16 15                     0
+ +--------+-------+-------+------------------------+
+ |   op   |  rs   |  rt   |         immed          |
+ | 000101 | src0  | src1  |         offset         |
+ +--------+-------+-------+------------------------+
+
+The target address offset is relative to the PC of the instruction *after*
+the actual branch.
+
+* mtc0
+
+ - Summary     : Move value in GPR to coprocessor 0 register
+ - Assembly    : mtc0 r_src, r_dst
+ - Description : CP0[r_dst] = R[r_src]
+ - Format      : cp0
+
+  31    26 25   21 20   16 15   11 10             0
+ +--------+-------+-------+-------+----------------+
+ |   op   |  mt   |  rt   |  rd   |                |
+ | 010000 | 00100 | src   | dst   |   0000000000   |
+ +--------+-------+-------+-------+----------------+
+
+--------------------------------------------------------------------------
+4.2 PARCv2
+--------------------------------------------------------------------------
+
+PARCv2 contains a subset of instructions of the PARC ISA that can be used
+to run raw C programs that do not use system calls. The coprocessor 0
+status register is used here as well to communicate data between the host
+and the processor. Statistics can be enabled by setting the coprocessor 0
+stats_en register.
+
+* andi
+
+ - Summary     : Bitwise logical AND with constant
+ - Assembly    : andi r_dst, r_src, n_val
+ - Description : R[r_dst] = R[r_src] & n_val
+ - Format      : imm
+
+  31    26 25   21 20   16 15                     0
+ +--------+-------+-------+------------------------+
+ |   op   |  rs   |  rt   |         immed          |
+ | 001100 | src   | dst   |         val            |
+ +--------+-------+-------+------------------------+
+
+* xori
+
+ - Summary     : Bitwise logical XOR with constant
+ - Assembly    : xori r_dst, r_src, n_val
+ - Description : R[r_dst] = R[r_src] ^ n_val
+ - Format      : imm
+
+  31    26 25   21 20   16 15                     0
+ +--------+-------+-------+------------------------+
+ |   op   |  rs   |  rt   |         immed          |
+ | 001110 | src   | dst   |         val            |
+ +--------+-------+-------+------------------------+
+
+* slti
+
+ - Summary     : Set GPR if source GPR is less than constant, signed comparison
+ - Assembly    : slti r_dst, r_src, n_val
+ - Description : R[r_dst] = ( R[r_src] < sext(n_val) )
+ - Format      : imm
+
+  31    26 25   21 20   16 15                     0
+ +--------+-------+-------+------------------------+
+ |   op   |  rs   |  rt   |         immed          |
+ | 001010 | src   | dst   |         val            |
+ +--------+-------+-------+------------------------+
+
+The 16-bit immediate value is sign-extended before being used in the
+unsigned comparison.
+
+* sltiu
+
+ - Summary     : Set GPR if source GPR is less than constant, unsigned comparison
+ - Assembly    : sltiu r_dst, r_src, n_val
+ - Description : R[r_dst] = ( R[r_src] < sext(n_val) )
+ - Format      : imm
+
+  31    26 25   21 20   16 15                     0
+ +--------+-------+-------+------------------------+
+ |   op   |  rs   |  rt   |         immed          |
+ | 001011 | src   | dst   |         val            |
+ +--------+-------+-------+------------------------+
+
+The 16-bit immediate value is sign-extended before being used in the
+unsigned comparison.
+
+* sll
+
+ - Summary     : Shift left logical constant (append zeroes)
+ - Assembly    : sll r_dst, r_src, n_shamt
+ - Description : R[r_dst] = R[r_src] << n_shamt
+ - Format      : shift
+
+  31    26 25   21 20   16 15   11 10    6 5      0
+ +--------+-------+-------+-------+-------+--------+
+ |   op   |       |  rt   |  rd   |  sa   |  cmd   |
+ | 000000 | 00000 | src   | dst   | shamt | 000000 |
+ +--------+-------+-------+-------+-------+--------+
+
+* srl
+
+ - Summary     : Shift right logical by constant (append zeroes)
+ - Assembly    : srl r_dst, r_src, n_shamt
+ - Description : R[r_dst] = R[r_src] >> n_shamt
+ - Format      : shift
+
+  31    26 25   21 20   16 15   11 10    6 5      0
+ +--------+-------+-------+-------+-------+--------+
+ |   op   |  rs   |  rt   |  rd   |  sa   |  cmd   |
+ | 000000 | 00000 | src   | dst   | shamt | 000010 |
+ +--------+-------+-------+-------+-------+--------+
+
+* sra
+
+ - Summary     : Shift right arithmetic by constant (sign-extend)
+ - Assembly    : sra r_dst, r_src, n_shamt
+ - Description : R[r_dst] = R[r_src] >>> n_shamt
+ - Format      : shift
+
+  31    26 25   21 20   16 15   11 10    6 5      0
+ +--------+-------+-------+-------+-------+--------+
+ |   op   |       |  rt   |  rd   |  sa   |  cmd   |
+ | 000000 | 00000 | src   | dst   | shamt | 000011 |
+ +--------+-------+-------+-------+-------+--------+
+
+* sllv
+
+ - Summary     : Shift left logical by register value (append zeroes)
+ - Assembly    : sllv r_dst, r_src, r_shamt
+ - Description : R[r_dst] = R[r_src] << R[r_shamt]
+ - Format      : shift
+
+  31    26 25   21 20   16 15   11 10    6 5      0
+ +--------+-------+-------+-------+-------+--------+
+ |   op   |  rs   |  rt   |  rd   |       |  cmd   |
+ | 000000 | shamt | src   | dst   | 00000 | 000100 |
+ +--------+-------+-------+-------+-------+--------+
+
+* srlv
+
+ - Summary     : Shift right logical by register value (append zeroes)
+ - Assembly    : srlv r_dst, r_src, r_shamt
+ - Description : R[r_dst] = R[r_src] >> R[r_shamt]
+ - Format      : shift
+
+  31    26 25   21 20   16 15   11 10    6 5      0
+ +--------+-------+-------+-------+-------+--------+
+ |   op   |  rs   |  rt   |  rd   |       |  cmd   |
+ | 000000 | shamt | src   | dst   | 00000 | 000110 |
+ +--------+-------+-------+-------+-------+--------+
+
+* srav
+
+ - Summary     : Shift right arithmetic by register value (sign-extend)
+ - Assembly    : srav r_dst, r_src, r_shamt
+ - Description : R[r_dst] = R[r_src] >>> R[r_shamt]
+ - Format      : shift
+
+  31    26 25   21 20   16 15   11 10    6 5      0
+ +--------+-------+-------+-------+-------+--------+
+ |   op   |  rs   |  rt   |  rd   |       |  cmd   |
+ | 000000 | shamt | src   | dst   | 00000 | 000111 |
+ +--------+-------+-------+-------+-------+--------+
+
+* subu
+
+ - Summary     : Signed subtraction with 3 GPRs, no overflow exception
+ - Assembly    : subu r_dst, r_src0, r_src1
+ - Description : R[r_dst] = R[r_src0] - R[r_src1]
+ - Format      : arith
+
+  31    26 25   21 20   16 15   11 10    6 5      0
+ +--------+-------+-------+-------+-------+--------+
+ |   op   |  rs   |  rt   |  rd   |       |  cmd   |
+ | 000000 | src0  | src1  | dst   | 00000 | 100011 |
+ +--------+-------+-------+-------+-------+--------+
+
+* and
+
+ - Summary     : Bitwise logical AND with 3 GPRs
+ - Assembly    : and r_dst, r_src0, r_src1
+ - Description : R[r_dst] = R[r_src0] & R[r_src1]
+ - Format      : arith
+
+  31    26 25   21 20   16 15   11 10    6 5      0
+ +--------+-------+-------+-------+-------+--------+
+ |   op   |  rs   |  rt   |  rd   |       |  cmd   |
+ | 000000 | src0  | src1  | dst   | 00000 | 100100 |
+ +--------+-------+-------+-------+-------+--------+
+
+* or
+
+ - Summary     : Bitwise logical OR with 3 GPRs
+ - Assembly    : or r_dst, r_src0, r_src1
+ - Description : R[r_dst] = R[r_src0] | R[r_src1]
+ - Format      : arith
+
+  31    26 25   21 20   16 15   11 10    6 5      0
+ +--------+-------+-------+-------+-------+--------+
+ |   op   |  rs   |  rt   |  rd   |       |  cmd   |
+ | 000000 | src0  | src1  | dst   | 00000 | 100101 |
+ +--------+-------+-------+-------+-------+--------+
+
+* xor
+
+ - Summary     : Bitwise logical XOR with 3 GPRs
+ - Assembly    : xor r_dst, r_src0, r_src1
+ - Description : R[r_dst] = R[r_src0] ^ R[r_src1]
+ - Format      : arith
+
+  31    26 25   21 20   16 15   11 10    6 5      0
+ +--------+-------+-------+-------+-------+--------+
+ |   op   |  rs   |  rt   |  rd   |       |  cmd   |
+ | 000000 | src0  | src1  | dst   | 00000 | 100110 |
+ +--------+-------+-------+-------+-------+--------+
+
+* nor
+
+ - Summary     : Bitwise logical NOR with 3 GPRs
+ - Assembly    : nor r_dst, r_src0, r_src1
+ - Description : R[r_dst] = !( R[r_src0] | R[r_src1] )
+ - Format      : arith
+
+  31    26 25   21 20   16 15   11 10    6 5      0
+ +--------+-------+-------+-------+-------+--------+
+ |   op   |  rs   |  rt   |  rd   |       |  cmd   |
+ | 000000 | src0  | src1  | dst   | 00000 | 100111 |
+ +--------+-------+-------+-------+-------+--------+
+
+* slt
+
+ - Summary     : Record result of signed less-than comparison with 2 GPRs
+ - Assembly    : slt r_dst, r_src0, r_src1
+ - Description : R[r_dst] = ( R[r_src0] < R[r_src1] )
+ - Format      : arith
+
+  31    26 25   21 20   16 15   11 10    6 5      0
+ +--------+-------+-------+-------+-------+--------+
+ |   op   |  rs   |  rt   |  rd   |       |  cmd   |
+ | 000000 | src0  | src1  | dst   | 00000 | 101010 |
+ +--------+-------+-------+-------+-------+--------+
+
+* sltu
+
+ - Summary     : Record result of unsigned less-than comparison with 2 GPRs
+ - Assembly    : sltu r_dst, r_src0, r_src1
+ - Description : R[r_dst] = ( R[r_src0] < R[r_src1] )
+ - Format      : arith
+
+  31    26 25   21 20   16 15   11 10    6 5      0
+ +--------+-------+-------+-------+-------+--------+
+ |   op   |  rs   |  rt   |  rd   |       |  cmd   |
+ | 000000 | src0  | src1  | dst   | 00000 | 101011 |
+ +--------+-------+-------+-------+-------+--------+
+
+* mul
+
+ - Summary     : Signed multiplication with 3 GPRs
+ - Assembly    : mul r_dst, r_src0, r_src1
+ - Description : R[r_dst] = R[r_src0] * R[r_src1]
+ - Format      : arith
+
+  31    26 25   21 20   16 15   11 10    6 5      0
+ +--------+-------+-------+-------+-------+--------+
+ |   op   |  rs   |  rt   |  rd   |       |  cmd   |
+ | 011100 | src0  | src1  | dst   | 00000 | 000010 |
+ +--------+-------+-------+-------+-------+--------+
+
+* div
+
+ - Summary     : Signed division with 3 GPRs
+ - Assembly    : div r_dst, r_src0, r_src1
+ - Description : R[r_dst] = R[r_src0] / R[r_src1]
+ - Format      : arith
+
+  31    26 25   21 20   16 15   11 10    6 5      0
+ +--------+-------+-------+-------+-------+--------+
+ |   op   |  rs   |  rt   |  rd   |       |  cmd   |
+ | 100111 | src0  | src1  | dst   | 00000 | 000101 |
+ +--------+-------+-------+-------+-------+--------+
+
+* divu
+
+ - Summary     : Unsigned division with 3 GPRs
+ - Assembly    : divu r_dst, r_src0, r_src1
+ - Description : R[r_dst] = R[r_src0] / R[r_src1]
+ - Format      : arith
+
+  31    26 25   21 20   16 15   11 10    6 5      0
+ +--------+-------+-------+-------+-------+--------+
+ |   op   |  rs   |  rt   |  rd   |       |  cmd   |
+ | 100111 | src0  | src1  | dst   | 00000 | 000111 |
+ +--------+-------+-------+-------+-------+--------+
+
+* rem
+
+ - Summary     : Signed remainder with 3 GPRs
+ - Assembly    : rem r_dst, r_src0, r_src1
+ - Description : R[r_dst] = R[r_src0] % R[r_src1]
+ - Format      : arith
+
+  31    26 25   21 20   16 15   11 10    6 5      0
+ +--------+-------+-------+-------+-------+--------+
+ |   op   |  rs   |  rt   |  rd   |       |  cmd   |
+ | 100111 | src0  | src1  | dst   | 00000 | 000110 |
+ +--------+-------+-------+-------+-------+--------+
+
+* remu
+
+ - Summary     : Unsigned remainder with 3 GPRs
+ - Assembly    : remu r_dst, r_src0, r_src1
+ - Description : R[r_dst] = R[r_src0] % R[r_src1]
+ - Format      : arith
+
+  31    26 25   21 20   16 15   11 10    6 5      0
+ +--------+-------+-------+-------+-------+--------+
+ |   op   |  rs   |  rt   |  rd   |       |  cmd   |
+ | 100111 | src0  | src1  | dst   | 00000 | 001000 |
+ +--------+-------+-------+-------+-------+--------+
+
+* lb
+
+ - Summary     : Load a byte from memory as signed value
+ - Assembly    : lb r_dst, n_offset(r_base)
+ - Description : R[r_dst] = M[ R[r_base] + n_offset ]
+ - Format      : mem
+
+  31    26 25   21 20   16 15                     0
+ +--------+-------+-------+------------------------+
+ |   op   |  rs   |  rt   |         immed          |
+ | 100000 | base  | dst   |         offset         |
+ +--------+-------+-------+------------------------+
+
+* lbu
+
+ - Summary     : Load a byte from memory as unsigned value
+ - Assembly    : lbu r_dst, n_offset(r_base)
+ - Description : R[r_dst] = M[ R[r_base] + n_offset ]
+ - Format      : mem
+
+  31    26 25   21 20   16 15                     0
+ +--------+-------+-------+------------------------+
+ |   op   |  rs   |  rt   |         immed          |
+ | 100100 | base  | dst   |         offset         |
+ +--------+-------+-------+------------------------+
+
+* lh
+
+ - Summary     : Load a halfword from memory as signed value
+ - Assembly    : lh r_dst, n_offset(r_base)
+ - Description : R[r_dst] = M[ R[r_base] + n_offset ]
+ - Format      : mem
+
+  31    26 25   21 20   16 15                     0
+ +--------+-------+-------+------------------------+
+ |   op   |  rs   |  rt   |         immed          |
+ | 100001 | base  | dst   |         offset         |
+ +--------+-------+-------+------------------------+
+
+* lhu
+
+ - Summary     : Load a halfword from memory as unsigned value
+ - Assembly    : lhu r_dst, n_offset(r_base)
+ - Description : R[r_dst] = M[ R[r_base] + n_offset ]
+ - Format      : mem
+
+  31    26 25   21 20   16 15                     0
+ +--------+-------+-------+------------------------+
+ |   op   |  rs   |  rt   |         immed          |
+ | 100101 | base  | dst   |         offset         |
+ +--------+-------+-------+------------------------+
+
+* sb
+
+ - Summary     : Store a byte to memory
+ - Assembly    : sb r_src, n_offset(r_base)
+ - Description : M[ R[r_base] + n_offset ] = R[r_src]
+ - Format      : mem
+
+  31    26 25   21 20   16 15                     0
+ +--------+-------+-------+------------------------+
+ |   op   |  rs   |  rt   |         immed          |
+ | 101000 | base  | src   |         offset         |
+ +--------+-------+-------+------------------------+
+
+* sh
+
+ - Summary     : Store a halfword to memory
+ - Assembly    : sh r_src, n_offset(r_base)
+ - Description : M[ R[r_base] + n_offset ] = R[r_src]
+ - Format      : mem
+
+  31    26 25   21 20   16 15                     0
+ +--------+-------+-------+------------------------+
+ |   op   |  rs   |  rt   |         immed          |
+ | 101001 | base  | src   |         offset         |
+ +--------+-------+-------+------------------------+
+
+* j
+
+ - Summary     : Jump to address
+ - Assembly    : j n_targ
+ - Description : PC_next = n_targ << 2
+ - Format      : br
+
+  31    26 25                                     0
+ +--------+----------------------------------------+
+ |   op   |                 immed                  |
+ | 000010 |                 targ                   |
+ +--------+----------------------------------------+
+
+See jal for notes on effective target address.
+
+* jalr
+
+ - Summary     : Jump to address and place return address in GPR
+ - Assembly    : jalr r_ret, r_targ
+ - Description : R[r_ret] = PC + 4, PC_next = r_targ
+ - Format      : br
+
+  31    26 25   21 20   16 15   11 10    6 5      0
+ +--------+-------+-------+-------+-------+--------+
+ |   op   |  rs   |       |  rd   |       |  cmd   |
+ | 000000 | targ  | 00000 | ret   | 00000 | 001001 |
+ +--------+-------+-------+-------+-------+--------+
+
+See jal for notes on return address. If r_ret is not defined in the
+assembly, the return address will be stored in GPR 31 by default. The
+target address in r_targ must be naturally aligned. r_targ and r_ret
+should not be equal, as it will cause behavior that is non-idempotent.
+
+* beq
+
+ - Summary     : Branch to PC-relative address if 2 GPRs are equal
+ - Assembly    : beq r_src0, r_src1, n_offset
+ - Description : if ( R[r_src0] == R[r_src1] ) PC_next = PC + 4 + ( n_offset << 2 )
+ - Format      : br
+
+  31    26 25   21 20   16 15                     0
+ +--------+-------+-------+------------------------+
+ |   op   |  rs   |  rt   |         immed          |
+ | 000100 | src0  | src1  |         offset         |
+ +--------+-------+-------+------------------------+
+
+* blez
+
+ - Summary     : Branch if GPR is less than or equal to zero
+ - Assembly    : blez r_src, n_offset
+ - Description : if ( R[r_src] <= 0 ) PC_next = PC + 4 + ( n_offset << 2 )
+ - Format      : br
+
+  31    26 25   21 20   16 15                     0
+ +--------+-------+-------+------------------------+
+ |   op   |  rs   |       |         immed          |
+ | 000110 | src   | 00000 |         offset         |
+ +--------+-------+-------+------------------------+
+
+* bgtz
+
+ - Summary     : Branch if GPR is greater than zero
+ - Assembly    : bgtz r_src, n_offset
+ - Description : if ( R[r_src] > 0 ) PC_next = PC + 4 + ( n_offset << 2 )
+ - Format      : br
+
+  31    26 25   21 20   16 15                     0
+ +--------+-------+-------+------------------------+
+ |   op   |  rs   |       |         immed          |
+ | 000111 | src   | 00000 |         offset         |
+ +--------+-------+-------+------------------------+
+
+* bltz
+
+ - Summary     : Branch if GPR is less than zero
+ - Assembly    : bltz r_src, n_offset
+ - Description : if ( R[r_src] < 0 ) PC_next = PC + 4 + ( n_offset << 2 )
+ - Format      : br
+
+  31    26 25   21 20   16 15                     0
+ +--------+-------+-------+------------------------+
+ |   op   |  rs   |       |         immed          |
+ | 000001 | src   | 00000 |         offset         |
+ +--------+-------+-------+------------------------+
+
+* bgez
+
+ - Summary     : Branch if GPR is greater than or equal to zero
+ - Assembly    : bgez r_src, n_offset
+ - Description : if ( R[r_src] >= 0 ) PC_next = PC + 4 + ( n_offset << 2 )
+ - Format      : br
+
+  31    26 25   21 20   16 15                     0
+ +--------+-------+-------+------------------------+
+ |   op   |  rs   |       |         immed          |
+ | 000001 | src   | 00001 |         offset         |
+ +--------+-------+-------+------------------------+
+
+--------------------------------------------------------------------------
+4.3 PARCv3
+--------------------------------------------------------------------------
+
+PARCv3 adds exception and system call support, allowing it to run C++
+programs. Currently PARC only supports system call exceptions. The mtc0
+and mfc0 instructions are used to stream data between the target manager
+running on the host and the processor to handle system calls. The kernel
+is responsible for packing the data to be streamed to the host as well as
+receiving data from the host into memory.
+
+* mfc0
+
+ - Summary     : Move value in coprocessor 0 register to GPR
+ - Assembly    : mfc0 r_dst, r_src
+ - Description : R[r_dst] = CP0[r_src]
+ - Format      : cp0
+
+  31    26 25   21 20   16 15   11 10             0
+ +--------+-------+-------+-------+----------------+
+ |   op   |  mf   |  rt   |  rd   |                |
+ | 010000 | 00000 | dst   | src   |   0000000000   |
+ +--------+-------+-------+-------+----------------+
+
+* syscall
+
+ - Summary     : Trap into system call exception
+ - Assembly    : syscall
+ - Description : n/a
+ - Format      : exception
+
+  31    26 25                            6 5      0
+ +--------+-------------------------------+--------+
+ |   op   |              code             |  cmd   |
+ | 000000 |                               | 001100 |
+ +--------+-------------------------------+--------+
+
+* eret
+
+ - Summary     : Return from exception
+ - Assembly    : eret
+ - Description : n/a
+ - Format      : exception
+
+  31    26 25                            6 5      0
+ +--------+-------------------------------+--------+
+ |   op   |              code             |  cmd   |
+ | 000000 |                               | 011000 |
+ +--------+-------------------------------+--------+
+
+Uses the return address stored in EPC to return from an exception.
+
+--------------------------------------------------------------------------
+4.4 PARCv4
+--------------------------------------------------------------------------
+
+PARCv4 adds support for a coherent multicore system with atomic
+instructions and a memory fence instruction.
+
+* amo.add
+
+ - Summary     : Atomic fetch & add
+ - Assembly    : amo.add r_dst, r_addr, r_src
+ - Description : atomic {
+                   temp = memory[R[r_addr]]
+                   memory[R[r_addr]] = temp + R[r_src]
+                   reg[r_dst] = temp
+                 }
+ - Format      : amo
+
+  31    26 25   21 20   16 15   11 10  8 7        0
+ +--------+-------+-------+-------+-----+----------+
+ |   op   |  rs   |  rt   |  rd   |     |   cmd    |
+ | 100111 | addr  | src   | dst   | 000 | 00000010 |
+ +--------+-------+-------+-------+-----+----------+
+
+Atomic instructions are a series of operations that all perform
+atomically with respect to other memory operations. For example, the
+amo.add instruction will perform a fetch and an add operation which looks
+like they both happened at once to other memory operations.
+
+* amo.and
+
+ - Summary     : Atomic fetch & and
+ - Assembly    : amo.and r_dst, r_addr, r_src
+ - Description : atomic {
+                   temp = memory[reg[r_addr]]
+                   memory[reg[r_addr]] = temp & reg[r_src]
+                   reg[r_dst] = temp
+                 }
+ - Format      : amo
+
+  31    26 25   21 20   16 15   11 10  8 7        0
+ +--------+-------+-------+-------+-----+----------+
+ |   op   |  rs   |  rt   |  rd   |     |   cmd    |
+ | 100111 | addr  | src   | dst   | 000 | 00000011 |
+ +--------+-------+-------+-------+-----+----------+
+
+See notes above for more information.
+
+* amo.or
+
+ - Summary     : Atomic fetch & or
+ - Assembly    : amo.or r_dst, r_addr, r_src
+ - Description : atomic {
+                   temp = memory[reg[r_addr]]
+                   memory[reg[r_addr]] = temp | reg[r_src]
+                   reg[r_dst] = temp
+                 }
+ - Format      : amo
+
+  31    26 25   21 20   16 15   11 10  8 7        0
+ +--------+-------+-------+-------+-----+----------+
+ |   op   |  rs   |  rt   |  rd   |     |   cmd    |
+ | 100111 | addr  | src   | dst   | 000 | 00000100 |
+ +--------+-------+-------+-------+-----+----------+
+
+See notes above for more information.
+
+* sync
+
+ - Summary     : Order loads and stores
+ - Assembly    : sync (stype = 0 implied)
+ - Description : n/a
+ - Format      : sync
+
+  31    26 25                   11 10    6 5      0
+ +--------+-----------------------+-------+--------+
+ |   op   |                       | stype |  cmd   |
+ | 000000 |  00 0000 0000 0000 0  | 00000 | 001111 |
+ +--------+-------------------------------+--------+
+
+All loads and stores that occur before a sync must complete before any
+loads and stores after the sync can start. A load is complete when the
+destination register is written and a store is complete when the stored
+value is visible to all cores in the system.
+

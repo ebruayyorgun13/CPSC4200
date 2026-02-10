@@ -1,0 +1,37 @@
+# Lab build artifacts
+build/
+work/
+obj_dir/
+sim_build/
+output/
+
+# Simulation output
+*.vcd
+*.fst
+*.out
+*.sim
+*.lxt*
+
+# Compiled HDL
+*.vvp
+*.elf
+*.bin
+*.img
+
+# Toolchain directories (possibly...)
+toolchain/
+local/
+pkgs/
+share/
+lib/
+include/
+bin/
+gcc/
+maven/
+
+# OS/editor junk
+.DS_Store
+*.swp
+*.swo
+.vscode/
+.idea/
