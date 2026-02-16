@@ -51,6 +51,9 @@ module parc_CoreDpath
   input         stall_Mhl,
   input         stall_Whl,
 
+  input  [1:0] rs_byp_sel_Dhl,
+  input  [1:0] rt_byp_sel_Dhl,
+
   // Control Signals (dpath->ctrl)
 
   output        branch_cond_eq_Xhl,
@@ -161,11 +164,31 @@ module parc_CoreDpath
   wire [ 4:0] rf_raddr1_Dhl = inst_rt_Dhl;
   wire [31:0] rf_rdata1_Dhl;
 
+  // Bypass source wires
+  wire [31:0] byp_X = execute_mux_out_Xhl;
+  wire [31:0] byp_M = wb_mux_out_Mhl;
+  wire [31:0] byp_W = wb_mux_out_Whl;
+
+  // rs bypass mux
+  wire [31:0] rs_byp_mux_out_Dhl
+    = ( rs_byp_sel_Dhl == 2'd0 ) ? rf_rdata0_Dhl
+    : ( rs_byp_sel_Dhl == 2'd1 ) ? byp_X
+    : ( rs_byp_sel_Dhl == 2'd2 ) ? byp_M
+    : ( rs_byp_sel_Dhl == 2'd3 ) ? byp_W
+    :                              32'bx;
+  // rt bypass mux
+  wire [31:0] rt_byp_mux_out_Dhl
+    = ( rt_byp_sel_Dhl == 2'd0 ) ? rf_rdata1_Dhl
+    : ( rt_byp_sel_Dhl == 2'd1 ) ? byp_X
+    : ( rt_byp_sel_Dhl == 2'd2 ) ? byp_M
+    : ( rt_byp_sel_Dhl == 2'd3 ) ? byp_W
+    :                              32'bx;
+
   // Jump reg address
 
   wire [31:0] jumpreg_targ_Dhl;
 
-  assign jumpreg_targ_Dhl  = rf_rdata0_Dhl;
+  assign jumpreg_targ_Dhl  = rs_byp_mux_out_Dhl;
 
   // Zero and sign extension immediate
 
@@ -184,7 +207,7 @@ module parc_CoreDpath
   // Operand 0 mux
 
   wire [31:0] op0_mux_out_Dhl
-    = ( op0_mux_sel_Dhl == 2'd0 ) ? rf_rdata0_Dhl
+    = ( op0_mux_sel_Dhl == 2'd0 ) ? rs_byp_mux_out_Dhl
     : ( op0_mux_sel_Dhl == 2'd1 ) ? shamt_Dhl
     : ( op0_mux_sel_Dhl == 2'd2 ) ? const16
     : ( op0_mux_sel_Dhl == 2'd3 ) ? const0
@@ -193,7 +216,7 @@ module parc_CoreDpath
   // Operand 1 mux
 
   wire [31:0] op1_mux_out_Dhl
-    = ( op1_mux_sel_Dhl == 3'd0 ) ? rf_rdata1_Dhl
+    = ( op1_mux_sel_Dhl == 3'd0 ) ? rt_byp_mux_out_Dhl
     : ( op1_mux_sel_Dhl == 3'd1 ) ? imm_zext_Dhl
     : ( op1_mux_sel_Dhl == 3'd2 ) ? imm_sext_Dhl
     : ( op1_mux_sel_Dhl == 3'd3 ) ? pc_plus4_Dhl
@@ -202,7 +225,7 @@ module parc_CoreDpath
 
   // wdata with bypassing
 
-  wire [31:0] wdata_Dhl = rf_rdata1_Dhl;
+  wire [31:0] wdata_Dhl = rt_byp_mux_out_Dhl;
 
   //----------------------------------------------------------------------
   // X <- D
@@ -364,12 +387,12 @@ module parc_CoreDpath
   always @ ( posedge clk ) begin
     pc_debug <= pc_Whl;
   end
-  
+
   //----------------------------------------------------------------------
   // Submodules
   //----------------------------------------------------------------------
-  
-  // Address Generation
+
+  // Address Generation 
 
   parc_InstMsgFromBits inst_msg_from_bits
   (
