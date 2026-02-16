@@ -396,6 +396,14 @@ module parc_CoreCtrl
       `PARC_INST_MSG_SB      :cs={ y, n, br_none, pm_p, am_rdat, y, bm_si, y, alu_add, md_x, n, mdm_x, em_x, st, ml_b, dmm_x, wm_mem, n, rt, n };
       `PARC_INST_MSG_SH      :cs={ y, n, br_none, pm_p, am_rdat, y, bm_si, y, alu_add, md_x, n, mdm_x, em_x, st, ml_h, dmm_x, wm_mem, n, rt, n };
 
+      `PARC_INST_MSG_J       :cs={ y,  y,    br_none, pm_j,   am_x,    n, bm_x,    n, alu_x,    md_x,    n, mdm_x, em_x,   nr,  ml_x, dmm_x, wm_x,    n,  rx, n   };
+      `PARC_INST_MSG_JALR    :cs={ y,  y,    br_none, pm_r,   am_0,    y, bm_pc,   n, alu_add,  md_x,    n, mdm_x, em_alu, nr,  ml_x, dmm_x, wm_alu,  y,  rd, n   };
+
+      `PARC_INST_MSG_BEQ     :cs={ y,  n,    br_beq,  pm_b,   am_rdat, y, bm_rdat, y, alu_xor,  md_x,    n, mdm_x, em_x,   nr,  ml_x, dmm_x,  wm_x,   n,  rx, n   };
+      `PARC_INST_MSG_BLEZ    :cs={ y,  n,    br_blez, pm_b,   am_rdat, y, bm_x,    n, alu_x,    md_x,    n, mdm_x, em_x,   nr,  ml_x, dmm_x,  wm_x,   n,  rx, n   };
+      `PARC_INST_MSG_BGTZ    :cs={ y,  n,    br_bgtz, pm_b,   am_rdat, y, bm_x,    n, alu_x,    md_x,    n, mdm_x, em_x,   nr,  ml_x, dmm_x,  wm_x,   n,  rx, n   };
+      `PARC_INST_MSG_BLTZ    :cs={ y,  n,    br_bltz, pm_b,   am_rdat, y, bm_x,    n, alu_x,    md_x,    n, mdm_x, em_x,   nr,  ml_x, dmm_x,  wm_x,   n,  rx, n   };
+      `PARC_INST_MSG_BGEZ    :cs={ y,  n,    br_bgez, pm_b,   am_rdat, y, bm_x,    n, alu_x,    md_x,    n, mdm_x, em_x,   nr,  ml_x, dmm_x,  wm_x,   n,  rx, n   };
 
     endcase
 
@@ -589,17 +597,25 @@ module parc_CoreCtrl
   assign dmemreq_msg_len = dmemreq_msg_len_Xhl;
   assign dmemreq_val     = ( inst_val_Xhl && !stall_Xhl && dmemreq_val_Xhl );
 
-  // Branch Conditions
+  // //  OLD BRANCH RESOLUTION
+  // // Branch Conditions
+  // wire bne_resolve_Xhl  = ~branch_cond_eq_Xhl;
+  // // Resolve Branch
+  // wire bne_taken_Xhl  = ( ( br_sel_Xhl == br_bne ) && bne_resolve_Xhl );
+  // wire any_br_taken_Xhl
+  //   = ( bne_taken_Xhl
+  //     );
+  // wire brj_taken_Xhl = ( inst_val_Xhl && any_br_taken_Xhl );
 
-  wire bne_resolve_Xhl  = ~branch_cond_eq_Xhl;
+  // NEW BRANCH RESOLUTION
+  wire beq_taken_Xhl  = ( ( br_sel_Xhl == br_beq  ) &&  branch_cond_eq_Xhl );
+  wire bne_taken_Xhl  = ( ( br_sel_Xhl == br_bne  ) && ~branch_cond_eq_Xhl );
+  wire blez_taken_Xhl = ( ( br_sel_Xhl == br_blez ) && ( branch_cond_neg_Xhl || branch_cond_zero_Xhl ) );
+  wire bgtz_taken_Xhl = ( ( br_sel_Xhl == br_bgtz ) && ~( branch_cond_neg_Xhl || branch_cond_zero_Xhl ) );
+  wire bltz_taken_Xhl = ( ( br_sel_Xhl == br_bltz ) &&  branch_cond_neg_Xhl );
+  wire bgez_taken_Xhl = ( ( br_sel_Xhl == br_bgez ) && ~branch_cond_neg_Xhl );
 
-  // Resolve Branch
-
-  wire bne_taken_Xhl  = ( ( br_sel_Xhl == br_bne ) && bne_resolve_Xhl );
-
-  wire any_br_taken_Xhl
-    = ( bne_taken_Xhl
-      );
+  wire any_br_taken_Xhl = beq_taken_Xhl  || bne_taken_Xhl || blez_taken_Xhl || bgtz_taken_Xhl || bltz_taken_Xhl || bgez_taken_Xhl;
 
   wire brj_taken_Xhl = ( inst_val_Xhl && any_br_taken_Xhl );
 
