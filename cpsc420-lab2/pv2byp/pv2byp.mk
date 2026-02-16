@@ -22,4 +22,3 @@ pv2byp_test_srcs = \
 pv2byp_prog_srcs = \
   pv2byp-sim.v \
   pv2byp-randdelay-sim.v \
-
