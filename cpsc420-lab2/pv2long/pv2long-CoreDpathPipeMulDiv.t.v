@@ -1,207 +1,165 @@
 //========================================================================
-// Test for MulDiv Unit
+// Functional Pipelined Mul/Div Unit
 //========================================================================
 
+`ifndef PARC_PIPE_MULDIV_ITERATIVE_V
+`define PARC_PIPE_MULDIV_ITERATIVE_V
+
 `include "imuldiv-MulDivReqMsg.v"
-`include "pv2long-CoreDpathPipeMulDiv.v"
-`include "vc-TestRandDelaySource.v"
-`include "vc-TestRandDelaySink.v"
-`include "vc-Test.v"
 
-//------------------------------------------------------------------------
-// Helper Module
-//------------------------------------------------------------------------
-
-module parc_CoreDpathPipeMulDiv_helper
+module parc_CoreDpathPipeMulDiv
 (
-  input       clk,
-  input       reset,
-  output      done
+  input         clk,
+  input         reset,
+
+  input   [2:0] muldivreq_msg_fn,
+  input  [31:0] muldivreq_msg_a,
+  input  [31:0] muldivreq_msg_b,
+  input         muldivreq_val,
+  output        muldivreq_rdy,
+
+  output [63:0] muldivresp_msg_result,
+  output        muldivresp_val,
+  input         muldivresp_rdy,
+  //These need to be hooked up to something!
+  input         stall_Xhl,
+  input         stall_Mhl,
+  input         stall_X2hl,
+  input         stall_X3hl
 );
 
-  wire [66:0] src_msg;
-  wire  [2:0] src_msg_fn;
-  wire [31:0] src_msg_a;
-  wire [31:0] src_msg_b;
-  wire        src_val;
-  wire        src_rdy;
-  wire        src_done;
+  // Set request ready if not stalled
 
-  wire [63:0] sink_msg;
-  wire        sink_val;
-  wire        sink_rdy;
-  wire        sink_done;
+  assign muldivreq_rdy = !stall;
+  wire   muldivreq_go  = muldivreq_val && muldivreq_rdy;
+
+  //----------------------------------------------------------------------
+  // Input Registers
+  //----------------------------------------------------------------------
+
+  reg  [2:0] fn_reg;
+  reg [31:0] a_reg;
+  reg [31:0] b_reg;
+  reg [63:0] result1_reg;
+  reg [63:0] result2_reg;
+  reg [63:0] result3_reg;
   
-  wire        sink_Xhl = sink_val && !sink_rdy;
-  wire        sink_Mhl = sink_Xhl;
-  wire        sink_X2hl = 1'b0;
-  wire        sink_X3hl = 1'b0;
+  reg        val0_reg;
+  reg        val1_reg;
+  reg        val2_reg;
+  reg        val3_reg;
+  wire val1_next = (stall_Xhl) ? 1'b0: (val0_reg);
+  wire val2_next = (stall_Mhl) ? 1'b0: (val1_reg);
+ 
+  always @ ( posedge clk ) begin
+    if ( reset ) begin
+      fn_reg <= 0;
+      a_reg <= 0;
+      b_reg <= 0;
+      val0_reg <= 0;
+      result1_reg <= 0;
+      result2_reg <= 0;
+      result3_reg <= 0;
+  
+      val0_reg <= 0;
+      val1_reg <= 0;
+      val2_reg <= 0;
+      val3_reg <= 0;
+    end else begin
+      if ( muldivreq_go ) begin
+        fn_reg   <= muldivreq_msg_fn;
+        a_reg    <= muldivreq_msg_a;
+        b_reg    <= muldivreq_msg_b;
+        val0_reg <= 1'b1;
+      end else if (!stall_Xhl) begin
+        val0_reg <= 1'b0;
+      end
+      if (! stall_Mhl) begin
+          result1_reg <= result0;
+          val1_reg <= val1_next;
+      end
+      if ( !stall  ) begin
+        result2_reg <= result1_reg;
+        result3_reg <= result2_reg;
+        val2_reg    <= val2_next;
+        val3_reg    <= val2_reg;
+      end
+    end
+  end
+  
 
-  assign done = src_done && sink_done;
+ 
+  //----------------------------------------------------------------------
+  // Functional Computation
+  //----------------------------------------------------------------------
 
-  vc_TestRandDelaySource#(67,1024,3) src
-  (
-    .clk   (clk),
-    .reset (reset),
-    .msg   (src_msg),
-    .val   (src_val),
-    .rdy   (src_rdy),
-    .done  (src_done)
-  );
+  // Sign of mul and div
 
-  imuldiv_MulDivReqMsgFromBits msgfrombits
-  (
-    .bits (src_msg),
-    .func (src_msg_fn),
-    .a    (src_msg_a),
-    .b    (src_msg_b)
-  );
+  wire sign = ( a_reg[31] ^ b_reg[31] );
 
-  parc_CoreDpathPipeMulDiv muldiv
-  (
-    .clk                   (clk),
-    .reset                 (reset),
-    .muldivreq_msg_fn      (src_msg_fn),
-    .muldivreq_msg_a       (src_msg_a),
-    .muldivreq_msg_b       (src_msg_b),
-    .muldivreq_val         (src_val),
-    .muldivreq_rdy         (src_rdy),
-    .muldivresp_msg_result (sink_msg),
-    .muldivresp_val        (sink_val),
-    .muldivresp_rdy        (sink_rdy),
-    .stall_Xhl             (sink_Xhl),
-    .stall_Mhl             (sink_Mhl),
-    .stall_X2hl            (sink_X2hl),
-    .stall_X3hl            (sink_X3hl)
+  // Unsigned operands
 
-  );
+  wire [31:0] a_unsign   = ( a_reg[31] == 1'b1 ) ? ( ~a_reg + 1'b1 )
+                         :                         a_reg;
+  wire [31:0] b_unsign   = ( b_reg[31] == 1'b1 ) ? ( ~b_reg + 1'b1 )
+                         :                         b_reg;
 
-  vc_TestRandDelaySink#(64,1024,3) sink
-  (
-    .clk   (clk),
-    .reset (reset),
-    .msg   (sink_msg),
-    .val   (sink_val),
-    .rdy   (sink_rdy),
-    .done  (sink_done)
-  );
+  // Unsigned computation
+
+  wire [31:0] quotientu  = a_reg / b_reg;
+  wire [31:0] remainderu = a_reg % b_reg;
+
+  // Signed computation
+
+  wire [63:0] product_raw   = a_unsign * b_unsign;
+  wire [31:0] quotient_raw  = a_unsign / b_unsign;
+  wire [31:0] remainder_raw = a_unsign % b_unsign;
+
+  // Signed Product
+
+  wire [63:0] product
+    = ( sign ) ? ( ~product_raw + 1'b1 )
+               : product_raw;
+
+  // Signed Quotient
+
+  wire [31:0] quotient
+    = ( sign ) ? ( ~quotient_raw + 1'b1 )
+               : quotient_raw;
+
+  // Remainder is same sign as dividend
+
+  wire [31:0] remainder
+    = ( a_reg[31] ) ? ( ~remainder_raw + 1'b1 )
+    :                 remainder_raw;
+
+  // Result mux
+
+  wire [63:0] result0
+    = ( fn_reg == `IMULDIV_MULDIVREQ_MSG_FUNC_MUL  ) ? product
+    : ( fn_reg == `IMULDIV_MULDIVREQ_MSG_FUNC_DIV  ) ? { remainder, quotient }
+    : ( fn_reg == `IMULDIV_MULDIVREQ_MSG_FUNC_DIVU ) ? { remainderu, quotientu }
+    : ( fn_reg == `IMULDIV_MULDIVREQ_MSG_FUNC_REM  ) ? { remainder, quotient }
+    : ( fn_reg == `IMULDIV_MULDIVREQ_MSG_FUNC_REMU ) ? { remainderu, quotientu }
+    :                                                  32'bx;
+
+  //----------------------------------------------------------------------
+  // Dummy Pipeline Stages
+  //----------------------------------------------------------------------
+
+  
+  // Set response data
+
+  assign muldivresp_msg_result = result3_reg;
+
+  // Set response valid
+
+  assign muldivresp_val = val3_reg;
+
+  // Stall signal
+
+  wire stall = val3_reg && !muldivresp_rdy;
 
 endmodule
 
-//------------------------------------------------------------------------
-// Main Tester Module
-//------------------------------------------------------------------------
-
-module tester;
-
-  // VCD Dump
-  initial begin
-    $dumpfile("dump.vcd");
-    $dumpvars;
-  end
-
-  `VC_TEST_SUITE_BEGIN( "parc-CoreDpathPipeMulDiv" )
-
-  reg  t0_reset = 1'b1;
-  wire t0_done;
-
-  parc_CoreDpathPipeMulDiv_helper t0
-  (
-    .clk   (clk),
-    .reset (t0_reset),
-    .done  (t0_done)
-  );
-
-  `VC_TEST_CASE_BEGIN( 1, "mul" )
-  begin
-
-    t0.src.src.m[0] = 67'h0_00000000_00000000; t0.sink.sink.m[0] = 64'h00000000_00000000;
-    t0.src.src.m[1] = 67'h0_00000001_00000001; t0.sink.sink.m[1] = 64'h00000000_00000001;
-    t0.src.src.m[2] = 67'h0_ffffffff_00000001; t0.sink.sink.m[2] = 64'hffffffff_ffffffff;
-    t0.src.src.m[3] = 67'h0_00000001_ffffffff; t0.sink.sink.m[3] = 64'hffffffff_ffffffff;
-    t0.src.src.m[4] = 67'h0_ffffffff_ffffffff; t0.sink.sink.m[4] = 64'h00000000_00000001;
-    t0.src.src.m[5] = 67'h0_00000008_00000003; t0.sink.sink.m[5] = 64'h00000000_00000018;
-    t0.src.src.m[6] = 67'h0_fffffff8_00000008; t0.sink.sink.m[6] = 64'hffffffff_ffffffc0;
-    t0.src.src.m[7] = 67'h0_fffffff8_fffffff8; t0.sink.sink.m[7] = 64'h00000000_00000040;
-    t0.src.src.m[8] = 67'h0_0deadbee_10000000; t0.sink.sink.m[8] = 64'h00deadbe_e0000000;
-    t0.src.src.m[9] = 67'h0_deadbeef_10000000; t0.sink.sink.m[9] = 64'hfdeadbee_f0000000;
-
-    #5;   t0_reset = 1'b1;
-    #20;  t0_reset = 1'b0;
-    #10000; `VC_TEST_CHECK( "Is sink finished?", t0_done )
-
-  end
-  `VC_TEST_CASE_END
-
-  `VC_TEST_CASE_BEGIN( 2, "div/rem" )
-  begin
-
-    t0.src.src.m[ 0] = 67'h1_00000000_00000001; t0.sink.sink.m[ 0] = 64'h00000000_00000000;
-    t0.src.src.m[ 1] = 67'h1_00000001_00000001; t0.sink.sink.m[ 1] = 64'h00000000_00000001;
-    t0.src.src.m[ 2] = 67'h1_00000000_ffffffff; t0.sink.sink.m[ 2] = 64'h00000000_00000000;
-    t0.src.src.m[ 3] = 67'h1_ffffffff_ffffffff; t0.sink.sink.m[ 3] = 64'h00000000_00000001;
-    t0.src.src.m[ 4] = 67'h1_00000222_0000002a; t0.sink.sink.m[ 4] = 64'h00000000_0000000d;
-    t0.src.src.m[ 5] = 67'h1_0a01b044_ffffb146; t0.sink.sink.m[ 5] = 64'h00000000_ffffdf76;
-    t0.src.src.m[ 6] = 67'h3_00000032_00000222; t0.sink.sink.m[ 6] = 64'h00000032_00000000;
-    t0.src.src.m[ 7] = 67'h3_00000222_00000032; t0.sink.sink.m[ 7] = 64'h0000002e_0000000a;
-    t0.src.src.m[ 8] = 67'h3_0a01b044_ffffb14a; t0.sink.sink.m[ 8] = 64'h00003372_ffffdf75;
-    t0.src.src.m[ 9] = 67'h3_deadbeef_0000beef; t0.sink.sink.m[ 9] = 64'hffffda72_ffffd353;
-    t0.src.src.m[10] = 67'h3_f5fe4fbc_00004eb6; t0.sink.sink.m[10] = 64'hffffcc8e_ffffdf75;
-    t0.src.src.m[11] = 67'h3_f5fe4fbc_ffffb14a; t0.sink.sink.m[11] = 64'hffffcc8e_0000208b;
-
-    #5;   t0_reset = 1'b1;
-    #20;  t0_reset = 1'b0;
-    #10000; `VC_TEST_CHECK( "Is sink finished?", t0_done )
-
-  end
-  `VC_TEST_CASE_END
-
-  `VC_TEST_CASE_BEGIN( 3, "divu/remu" )
-  begin
-
-    t0.src.src.m[ 0] = 67'h2_00000000_00000001; t0.sink.sink.m[ 0] = 64'h00000000_00000000;
-    t0.src.src.m[ 1] = 67'h2_00000001_00000001; t0.sink.sink.m[ 1] = 64'h00000000_00000001;
-    t0.src.src.m[ 2] = 67'h2_00000000_ffffffff; t0.sink.sink.m[ 2] = 64'h00000000_00000000;
-    t0.src.src.m[ 3] = 67'h2_ffffffff_ffffffff; t0.sink.sink.m[ 3] = 64'h00000000_00000001;
-    t0.src.src.m[ 4] = 67'h2_00000222_0000002a; t0.sink.sink.m[ 4] = 64'h00000000_0000000d;
-    t0.src.src.m[ 5] = 67'h2_0a01b044_00004eba; t0.sink.sink.m[ 5] = 64'h00000000_0000208a;
-    t0.src.src.m[ 6] = 67'h4_00000032_00000222; t0.sink.sink.m[ 6] = 64'h00000032_00000000;
-    t0.src.src.m[ 7] = 67'h4_00000222_00000032; t0.sink.sink.m[ 7] = 64'h0000002e_0000000a;
-    t0.src.src.m[ 8] = 67'h4_0a01b044_ffffb14a; t0.sink.sink.m[ 8] = 64'h0a01b044_00000000;
-    t0.src.src.m[ 9] = 67'h4_deadbeef_0000beef; t0.sink.sink.m[ 9] = 64'h0000227f_00012a90;
-    t0.src.src.m[10] = 67'h4_f5fe4fbc_00004eb6; t0.sink.sink.m[10] = 64'h000006f0_00032012;
-    t0.src.src.m[11] = 67'h4_f5fe4fbc_ffffb14a; t0.sink.sink.m[11] = 64'hf5fe4fbc_00000000;
-
-    #5;   t0_reset = 1'b1;
-    #20;  t0_reset = 1'b0;
-    #10000; `VC_TEST_CHECK( "Is sink finished?", t0_done )
-
-  end
-  `VC_TEST_CASE_END
-
-  `VC_TEST_CASE_BEGIN( 4, "mixed" )
-  begin
-
-    t0.src.src.m[ 0] = 67'h0_fffffff8_00000008; t0.sink.sink.m[ 0] = 64'hffffffff_ffffffc0;
-    t0.src.src.m[ 1] = 67'h0_fffffff8_fffffff8; t0.sink.sink.m[ 1] = 64'h00000000_00000040;
-    t0.src.src.m[ 2] = 67'h0_0deadbee_10000000; t0.sink.sink.m[ 2] = 64'h00deadbe_e0000000;
-    t0.src.src.m[ 3] = 67'h0_deadbeef_10000000; t0.sink.sink.m[ 3] = 64'hfdeadbee_f0000000;
-    t0.src.src.m[ 4] = 67'h1_0a01b044_ffffb14a; t0.sink.sink.m[ 4] = 64'h00003372_ffffdf75;
-    t0.src.src.m[ 5] = 67'h1_deadbeef_0000beef; t0.sink.sink.m[ 5] = 64'hffffda72_ffffd353;
-    t0.src.src.m[ 6] = 67'h3_f5fe4fbc_00004eb6; t0.sink.sink.m[ 6] = 64'hffffcc8e_ffffdf75;
-    t0.src.src.m[ 7] = 67'h3_f5fe4fbc_ffffb14a; t0.sink.sink.m[ 7] = 64'hffffcc8e_0000208b;
-    t0.src.src.m[ 8] = 67'h2_0a01b044_ffffb14a; t0.sink.sink.m[ 8] = 64'h0a01b044_00000000;
-    t0.src.src.m[ 9] = 67'h2_deadbeef_0000beef; t0.sink.sink.m[ 9] = 64'h0000227f_00012a90;
-    t0.src.src.m[10] = 67'h4_f5fe4fbc_00004eb6; t0.sink.sink.m[10] = 64'h000006f0_00032012;
-    t0.src.src.m[11] = 67'h4_f5fe4fbc_ffffb14a; t0.sink.sink.m[11] = 64'hf5fe4fbc_00000000;
-
-    #5;   t0_reset = 1'b1;
-    #20;  t0_reset = 1'b0;
-    #10000; `VC_TEST_CHECK( "Is sink finished?", t0_done )
-
-  end
-  `VC_TEST_CASE_END
-
-  `VC_TEST_SUITE_END( 4 )
-
-endmodule
+`endif
