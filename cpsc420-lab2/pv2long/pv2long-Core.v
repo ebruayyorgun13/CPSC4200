@@ -75,6 +75,9 @@ module parc_Core
   wire        stall_Mhl;
   wire        stall_Whl;
 
+  wire stall_X2hl;
+  wire stall_X3hl;
+
   wire        branch_cond_eq_Xhl;
   wire        branch_cond_zero_Xhl;
   wire        branch_cond_neg_Xhl;
@@ -174,6 +177,8 @@ module parc_Core
     .stall_Xhl              (stall_Xhl),
     .stall_Mhl              (stall_Mhl),
     .stall_Whl              (stall_Whl),
+    .stall_X2hl ( stall_X2hl ),
+    .stall_X3hl ( stall_X3hl ),
 
     // Control Signals (dpath->ctrl)
 
@@ -235,6 +240,8 @@ module parc_Core
     .stall_Xhl               (stall_Xhl),
     .stall_Mhl               (stall_Mhl),
     .stall_Whl               (stall_Whl),
+    .stall_X2hl ( stall_X2hl ),
+    .stall_X3hl ( stall_X3hl ),
 
     // Control Signals (dpath->ctrl)
 
