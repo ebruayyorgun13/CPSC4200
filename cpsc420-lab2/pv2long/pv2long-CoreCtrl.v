@@ -691,7 +691,7 @@ module parc_CoreCtrl
   // Muldiv request
 
   assign muldivreq_val = muldivreq_val_Xhl && inst_val_Xhl;
-  assign muldivresp_rdy = !stall_Xhl;
+  assign muldivresp_rdy = !stall_X3hl;
 
   // Only send a valid dmem request if not stalled
 
@@ -727,8 +727,9 @@ module parc_CoreCtrl
 
   // Stall in X if muldiv reponse is not valid and there was a valid request
 
-  wire stall_muldiv_Xhl = ( muldivreq_val_Xhl && inst_val_Xhl && !muldivresp_val );
-
+  //wire stall_muldiv_Xhl = ( muldivreq_val_Xhl && inst_val_Xhl && !muldivresp_val );
+  assign stall_X2hl = stall_X3hl;
+  assign stall_X3hl = stall_Whl;
   // Stall in X if imem is not ready
 
   wire stall_imem_Xhl = !imemreq_rdy;
@@ -739,7 +740,7 @@ module parc_CoreCtrl
 
   // Aggregate Stall Signal
 
-  assign stall_Xhl = ( stall_Mhl || stall_muldiv_Xhl || stall_imem_Xhl || stall_dmem_Xhl );
+  assign stall_Xhl = ( stall_X2hl || stall_imem_Xhl || stall_dmem_Xhl );
 
   // Next bubble bit
 
@@ -817,8 +818,69 @@ module parc_CoreCtrl
                        : ( bubble_sel_Mhl )  ? 1'b1
                        :                       1'bx;
 
+
   //----------------------------------------------------------------------
-  // W <- M
+  // X2 <- M
+  //----------------------------------------------------------------------
+  reg [31:0] ir_X2hl;
+  reg        dmemreq_val_X2hl;
+  // reg  [2:0] dmemresp_mux_sel_Mhl; (declared as output)
+  // reg        wb_mux_sel_Mhl; (declared as output)
+  reg        rf_wen_X2hl;
+  reg  [4:0] rf_waddr_X2hl;
+  reg        cp0_wen_X2hl;
+  reg  [4:0] cp0_addr_X2hl;
+
+  reg        bubble_X2hl;
+
+  // Pipeline Controls
+
+  always @ ( posedge clk ) begin
+    if ( reset ) begin
+      bubble_X2hl <= 1'b1;
+    end
+    else if( !stall_X2hl ) begin
+      ir_X2hl           <= ir_Mhl;
+      rf_wen_X2hl       <= rf_wen_Mhl;
+      rf_waddr_X2hl     <= rf_waddr_Mhl;
+      cp0_wen_X2hl      <= cp0_wen_Mhl;
+      cp0_addr_X2hl     <= cp0_addr_Mhl;
+
+      bubble_X2hl       <= bubble_next_Mhl;
+    end
+  end
+
+  //----------------------------------------------------------------------
+  // X3 <- X2
+  //----------------------------------------------------------------------
+  reg [31:0] ir_X3hl;
+  reg        dmemreq_val_X3hl;
+  // reg  [2:0] dmemresp_mux_sel_Mhl; (declared as output)
+  // reg        wb_mux_sel_Mhl; (declared as output)
+  reg        rf_wen_X3hl;
+  reg  [4:0] rf_waddr_X3hl;
+  reg        cp0_wen_X3hl;
+  reg  [4:0] cp0_addr_X3hl;
+
+  reg        bubble_X3hl;
+
+  // Pipeline Controls
+
+  always @ ( posedge clk ) begin
+    if ( reset ) begin
+      bubble_X3hl <= 1'b1;
+    end
+    else if( !stall_X3hl ) begin
+      ir_X3hl           <= ir_X2hl;
+      rf_wen_X3hl       <= rf_wen_X2hl;
+      rf_waddr_X3hl     <= rf_waddr_X2hl;
+      cp0_wen_X3hl      <= cp0_wen_X2hl;
+      cp0_addr_X3hl     <= cp0_addr_X2hl;
+      bubble_X3hl       <= bubble_X2hl;
+    end
+  end
+  //----------------------------------------------------------------------
+  // W <- X3
   //----------------------------------------------------------------------
 
   reg [31:0] ir_Whl;
@@ -837,13 +899,13 @@ module parc_CoreCtrl
       bubble_Whl <= 1'b1;
     end
     else if( !stall_Whl ) begin
-      ir_Whl           <= ir_Mhl;
-      rf_wen_Whl       <= rf_wen_Mhl;
-      rf_waddr_Whl     <= rf_waddr_Mhl;
-      cp0_wen_Whl      <= cp0_wen_Mhl;
-      cp0_addr_Whl     <= cp0_addr_Mhl;
+      ir_Whl           <= ir_X3hl;
+      rf_wen_Whl       <= rf_wen_X3hl;
+      rf_waddr_Whl     <= rf_waddr_X3hl;
+      cp0_wen_Whl      <= cp0_wen_X3hl;
+      cp0_addr_Whl     <= cp0_addr_X3hl;
 
-      bubble_Whl       <= bubble_next_Mhl;
+      bubble_Whl       <= bubble_X3hl;
     end
     dmemresp_queue_val_Mhl <= dmemresp_queue_val_next_Mhl;
   end

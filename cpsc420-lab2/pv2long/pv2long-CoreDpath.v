@@ -6,7 +6,7 @@
 `define PARC_CORE_DPATH_V
 
 //`include "imuldiv-IntMulDivIterative.v"
-`include "pv2long-CareDpathPipeMulDiv.v"
+`include "pv2long-CoreDpathPipeMulDiv.v"
 `include "pv2long-InstMsg.v"
 `include "pv2long-CoreDpathAlu.v"
 `include "pv2long-CoreDpathRegfile.v"
@@ -33,7 +33,7 @@ module parc_CoreDpath
   input   [2:0] op1_mux_sel_Dhl,
   input  [31:0] inst_Dhl,
   input   [3:0] alu_fn_Xhl,
-  input   [2:0] muldivreq_msg_fn_Dhl,
+  input   [2:0] muldivreq_msg_fn_Xhl,
   input         muldivreq_val,
   output        muldivreq_rdy,
   output        muldivresp_val,
@@ -167,6 +167,7 @@ module parc_CoreDpath
   wire [ 4:0] rf_raddr1_Dhl = inst_rt_Dhl;
   wire [31:0] rf_rdata1_Dhl;
 
+  //wire [31:0] execute_mux_out_Xhl;
   // Bypass source wires
   wire [31:0] byp_X = execute_mux_out_Xhl;
   wire [31:0] byp_M = wb_mux_out_Mhl;
@@ -474,7 +475,7 @@ module parc_CoreDpath
   (
     .clk                   (clk),
     .reset                 (reset),
-    .muldivreq_msg_fn      (muldivreq_msg_fn_Dhl),
+    .muldivreq_msg_fn      (muldivreq_msg_fn_Xhl),
     .muldivreq_msg_a       (op0_mux_out_Dhl),
     .muldivreq_msg_b       (op1_mux_out_Dhl),
     .muldivreq_val         (muldivreq_val),
