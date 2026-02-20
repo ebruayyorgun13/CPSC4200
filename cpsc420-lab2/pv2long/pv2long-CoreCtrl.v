@@ -52,6 +52,9 @@ module parc_CoreCtrl
   output wire       stall_Mhl,
   output wire       stall_Whl,
 
+  output stall_X2hl,
+  output stall_X3hl,
+
   // Control Signals (dpath->ctrl)
 
   input             branch_cond_eq_Xhl,
@@ -307,6 +310,8 @@ module parc_CoreCtrl
   wire is_load_Dhl;
   assign is_load_Dhl = ( cs[`PARC_INST_MSG_MEM_REQ] == ld );
 
+  wire stall_load_use_Dhl; 
+
   reg is_load_Xhl;
   always @(posedge clk) begin
     if ( reset )
@@ -531,7 +536,14 @@ module parc_CoreCtrl
 
   // Stall in D if muldiv unit is not ready and there is a valid request
 
-  wire stall_muldiv_Dhl = ( muldivreq_val_Dhl && inst_val_Dhl && !muldivreq_rdy );
+  wire muldiv_inflight =
+      ( muldivreq_val_Xhl  && inst_val_Xhl )
+  || ( muldivreq_val_Mhl  && inst_val_Mhl )
+  || ( muldivreq_val_X2hl && inst_val_X2hl )
+  || ( muldivreq_val_X3hl && inst_val_X3hl );
+
+  wire stall_muldiv_Dhl = muldiv_inflight;
+  // wire stall_muldiv_Dhl = ( muldivreq_val_Xhl && inst_val_Xhl && !muldivresp_val );
 
   // Stall for data hazards if either of the operand read addresses are
   // the same as the write addresses of instruction later in the pipeline
@@ -725,11 +737,11 @@ module parc_CoreCtrl
 
   // Stall in X if muldiv reponse is not valid and there was a valid request
 
-  wire stall_muldiv_Xhl = ( muldivreq_val_Xhl && inst_val_Xhl && !muldivresp_val );
+  wire stall_muldiv_Xhl = ( muldivreq_val_Xhl && inst_val_Xhl && !muldivresp_val);
 
   // Stall in X if imem is not ready
 
-  wire stall_imem_Xhl = !imemreq_rdy;
+  // wire stall_imem_Xhl = !imemreq_rdy;
 
   // Stall in X if dmem is not ready and there was a valid request
 
@@ -737,7 +749,10 @@ module parc_CoreCtrl
 
   // Aggregate Stall Signal
 
-  assign stall_Xhl = ( stall_Mhl || stall_muldiv_Xhl || stall_imem_Xhl || stall_dmem_Xhl );
+  assign stall_Xhl = ( stall_Mhl 
+                      || stall_muldiv_Xhl 
+                      // || stall_imem_Xhl 
+                      || stall_dmem_Xhl );
 
   // Next bubble bit
 
@@ -781,6 +796,16 @@ module parc_CoreCtrl
     dmemreq_val_Mhl <= dmemreq_val;
   end
 
+  // Add flag to track whether insn in X is muldiv
+  reg muldivreq_val_Mhl;
+
+  always @(posedge clk) begin
+    if ( reset )
+      muldivreq_val_Mhl <= 1'b0;
+    else if ( !stall_Mhl )
+      muldivreq_val_Mhl <= muldivreq_val_Xhl;
+  end
+
   //----------------------------------------------------------------------
   // Memory Stage
   //----------------------------------------------------------------------
@@ -808,6 +833,10 @@ module parc_CoreCtrl
 
   assign stall_Mhl = ( stall_imem_Mhl || stall_dmem_Mhl );
 
+  // X2 and X3 Stall Logic
+  assign stall_X2hl = stall_X3hl;
+  assign stall_X3hl = stall_Whl;
+
   // Next bubble bit
 
   wire bubble_sel_Mhl  = ( squash_Mhl || stall_Mhl );
@@ -816,34 +845,97 @@ module parc_CoreCtrl
                        :                       1'bx;
 
   //----------------------------------------------------------------------
-  // W <- M
+  // X2 <- M
   //----------------------------------------------------------------------
 
-  reg [31:0] ir_Whl;
-  // reg        dmemresp_queue_val_Mhl; (declared as output)
-  reg        rf_wen_Whl;
-  // reg  [4:0] rf_waddr_Whl; (declared as output)
-  reg        cp0_wen_Whl;
-  reg  [4:0] cp0_addr_Whl;
+  reg [31:0] ir_X2hl;
+  reg rf_wen_X2hl;
+  reg [4:0] rf_waddr_X2hl;
+  reg cp0_wen_X2hl;
+  reg [4:0] cp0_addr_X2hl;
+  reg bubble_X2hl;
 
+  always @(posedge clk) begin
+    if (reset)
+      bubble_X2hl <= 1'b1;
+    else if (!stall_X2hl) begin
+      ir_X2hl       <= ir_Mhl;
+      rf_wen_X2hl   <= rf_wen_Mhl;
+      rf_waddr_X2hl <= rf_waddr_Mhl;
+      cp0_wen_X2hl  <= cp0_wen_Mhl;
+      cp0_addr_X2hl <= cp0_addr_Mhl;
+      bubble_X2hl   <= bubble_next_Mhl;
+    end
+  end
+
+  reg muldivreq_val_X2hl;
+
+  always @(posedge clk) begin
+    if (reset)
+      muldivreq_val_X2hl <= 1'b0;
+    else if (!stall_X2hl)
+      muldivreq_val_X2hl <= muldivreq_val_Mhl;
+  end
+
+  wire squash_X2hl = 1'b0;
+  wire inst_val_X2hl = ( !bubble_X2hl && !squash_X2hl );
+
+  //----------------------------------------------------------------------
+  // X3 <- X2
+  //----------------------------------------------------------------------
+  reg [31:0] ir_X3hl;
+  reg rf_wen_X3hl;
+  reg [4:0] rf_waddr_X3hl;
+  reg cp0_wen_X3hl;
+  reg [4:0] cp0_addr_X3hl;
+  reg bubble_X3hl;
+
+  always @(posedge clk) begin
+    if (reset)
+      bubble_X3hl <= 1'b1;
+    else if (!stall_X3hl) begin
+      ir_X3hl       <= ir_X2hl;
+      rf_wen_X3hl   <= rf_wen_X2hl;
+      rf_waddr_X3hl <= rf_waddr_X2hl;
+      cp0_wen_X3hl  <= cp0_wen_X2hl;
+      cp0_addr_X3hl <= cp0_addr_X2hl;
+      bubble_X3hl   <= bubble_X2hl;
+    end
+  end
+
+  reg muldivreq_val_X3hl;
+
+  always @(posedge clk) begin
+    if (reset)
+      muldivreq_val_X3hl <= 1'b0;
+    else if (!stall_X3hl)
+      muldivreq_val_X3hl <= muldivreq_val_X2hl;
+  end
+
+  wire squash_X3hl = 1'b0;
+  wire inst_val_X3hl = ( !bubble_X3hl && !squash_X3hl );
+
+  //----------------------------------------------------------------------
+  // W <- X3
+  //----------------------------------------------------------------------
+
+  reg rf_wen_Whl;
+  reg cp0_wen_Whl;
+  reg [4:0] cp0_addr_Whl;
+  reg [31:0] ir_Whl;
   reg        bubble_Whl;
 
-  // Pipeline Controls
-
-  always @ ( posedge clk ) begin
-    if ( reset ) begin
+  always @(posedge clk) begin
+    if (reset)
       bubble_Whl <= 1'b1;
+    else if (!stall_Whl) begin
+      ir_Whl       <= ir_X3hl;
+      rf_wen_Whl   <= rf_wen_X3hl;
+      rf_waddr_Whl  <= rf_waddr_X3hl;
+      cp0_wen_Whl  <= cp0_wen_X3hl;
+      cp0_addr_Whl <= cp0_addr_X3hl;
+      bubble_Whl   <= bubble_X3hl;
     end
-    else if( !stall_Whl ) begin
-      ir_Whl           <= ir_Mhl;
-      rf_wen_Whl       <= rf_wen_Mhl;
-      rf_waddr_Whl     <= rf_waddr_Mhl;
-      cp0_wen_Whl      <= cp0_wen_Mhl;
-      cp0_addr_Whl     <= cp0_addr_Mhl;
-
-      bubble_Whl       <= bubble_next_Mhl;
-    end
-    dmemresp_queue_val_Mhl <= dmemresp_queue_val_next_Mhl;
   end
 
   //----------------------------------------------------------------------

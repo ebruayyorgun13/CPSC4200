@@ -51,6 +51,9 @@ module parc_CoreDpath
   input         stall_Mhl,
   input         stall_Whl,
 
+  input stall_X2hl,
+  input stall_X3hl,
+
   input  [1:0] rs_byp_sel_Dhl,
   input  [1:0] rt_byp_sel_Dhl,
 
@@ -357,16 +360,44 @@ module parc_CoreDpath
     :                              32'bx;
 
   //----------------------------------------------------------------------
-  // W <- M
+  // X2 <- M
   //----------------------------------------------------------------------
 
-  reg  [31:0] pc_Whl;
-  reg  [31:0] wb_mux_out_Whl;
+  reg [31:0] pc_X2hl;
+  reg [31:0] wb_mux_out_X2hl;
 
-  always @ (posedge clk) begin
-    if( !stall_Whl ) begin
-      pc_Whl                 <= pc_Mhl;
-      wb_mux_out_Whl         <= wb_mux_out_Mhl;
+  always @(posedge clk) begin
+    if ( !stall_X2hl ) begin
+      pc_X2hl         <= pc_Mhl;
+      wb_mux_out_X2hl <= wb_mux_out_Mhl;
+    end
+  end
+
+  //----------------------------------------------------------------------
+  // X3 <- X2
+  //----------------------------------------------------------------------
+
+  reg [31:0] pc_X3hl;
+  reg [31:0] wb_mux_out_X3hl;
+
+  always @(posedge clk) begin
+    if ( !stall_X3hl ) begin   // still using stall_Mhl for now
+      pc_X3hl         <= pc_X2hl;
+      wb_mux_out_X3hl <= wb_mux_out_X2hl;
+    end
+  end
+
+  //----------------------------------------------------------------------
+  // W <- X3
+  //----------------------------------------------------------------------
+
+  reg [31:0] pc_Whl;
+  reg [31:0] wb_mux_out_Whl;
+
+  always @(posedge clk) begin
+    if ( !stall_Whl ) begin
+      pc_Whl         <= pc_X3hl;
+      wb_mux_out_Whl <= wb_mux_out_X3hl;
     end
   end
 
