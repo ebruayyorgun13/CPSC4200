@@ -5,8 +5,7 @@
 `ifndef PARC_CORE_DPATH_V
 `define PARC_CORE_DPATH_V
 
-//`include "imuldiv-IntMulDivIterative.v"
-`include "pv2long-CoreDpathPipeMulDiv.v"
+`include "imuldiv-IntMulDivIterative.v"
 `include "pv2long-InstMsg.v"
 `include "pv2long-CoreDpathAlu.v"
 `include "pv2long-CoreDpathRegfile.v"
@@ -50,8 +49,6 @@ module parc_CoreDpath
   input         stall_Dhl,
   input         stall_Xhl,
   input         stall_Mhl,
-  input         stall_X2hl,
-  input         stall_X3hl,
   input         stall_Whl,
 
   input  [1:0] rs_byp_sel_Dhl,
@@ -167,7 +164,6 @@ module parc_CoreDpath
   wire [ 4:0] rf_raddr1_Dhl = inst_rt_Dhl;
   wire [31:0] rf_rdata1_Dhl;
 
-  //wire [31:0] execute_mux_out_Xhl;
   // Bypass source wires
   wire [31:0] byp_X = execute_mux_out_Xhl;
   wire [31:0] byp_M = wb_mux_out_Mhl;
@@ -270,8 +266,23 @@ module parc_CoreDpath
   assign dmemreq_msg_addr = alu_out_Xhl;
   assign dmemreq_msg_data = wdata_Xhl;
 
-  assign execute_mux_out_Xhl = alu_out_Xhl;
+  // Muldiv Unit
 
+  wire [63:0] muldivresp_msg_result_Xhl;
+
+  // Muldiv Result Mux
+
+  wire [31:0] muldiv_mux_out_Xhl
+    = ( muldiv_mux_sel_Xhl == 1'd0 ) ? muldivresp_msg_result_Xhl[31:0]
+    : ( muldiv_mux_sel_Xhl == 1'd1 ) ? muldivresp_msg_result_Xhl[63:32]
+    :                                  32'bx;
+
+  // Execute Result Mux
+
+  wire [31:0] execute_mux_out_Xhl
+    = ( execute_mux_sel_Xhl == 1'd0 ) ? alu_out_Xhl
+    : ( execute_mux_sel_Xhl == 1'd1 ) ? muldiv_mux_out_Xhl
+    :                                   32'bx;
 
   //----------------------------------------------------------------------
   // M <- X
@@ -288,7 +299,6 @@ module parc_CoreDpath
       wdata_Mhl           <= wdata_Xhl;
     end
   end
-
 
   //----------------------------------------------------------------------
   // Memory Stage
@@ -347,54 +357,7 @@ module parc_CoreDpath
     :                              32'bx;
 
   //----------------------------------------------------------------------
-  // X2 <- M
-  //----------------------------------------------------------------------
-
-  reg  [31:0] pc_X2hl;
-  reg  [31:0] wb_mux_out_X2hl;
-
-  always @ (posedge clk) begin
-    if( !stall_X2hl ) begin
-      pc_X2hl                 <= pc_Mhl;
-      wb_mux_out_X2hl         <= wb_mux_out_Mhl;
-    end
-  end
-
-  //----------------------------------------------------------------------
-  // X3 <- X2
-  //----------------------------------------------------------------------
-
-  // Muldiv Unit
-
-  wire [63:0] muldivresp_msg_result_X3hl;
-
-  // Muldiv Result Mux
-
-  wire [31:0] muldiv_mux_out_X3hl
-    = ( muldiv_mux_sel_Xhl == 1'd0 ) ? muldivresp_msg_result_X3hl[31:0]
-    : ( muldiv_mux_sel_Xhl == 1'd1 ) ? muldivresp_msg_result_X3hl[63:32]
-    :                                  32'bx;
-
-  reg  [31:0] pc_X3hl;
-  reg  [31:0] wb_mux_out_X3hl;
-
-  always @ (posedge clk) begin
-    if( !stall_X3hl ) begin
-      pc_X3hl                 <= pc_X2hl;
-      if(execute_mux_sel_Xhl == 1'd0) begin
-        wb_mux_out_X3hl         <= wb_mux_out_X2hl;
-      end
-      else if (execute_mux_sel_Xhl == 1'd1) begin
-        wb_mux_out_X3hl         <= muldiv_mux_out_X3hl;
-      end
-      else begin
-        wb_mux_out_X3hl         <= 32'bx;
-      end
-    end
-  end
-
-  //----------------------------------------------------------------------
-  // W <- X3
+  // W <- M
   //----------------------------------------------------------------------
 
   reg  [31:0] pc_Whl;
@@ -402,8 +365,8 @@ module parc_CoreDpath
 
   always @ (posedge clk) begin
     if( !stall_Whl ) begin
-      pc_Whl                 <= pc_X3hl;
-      wb_mux_out_Whl         <= wb_mux_out_X3hl;
+      pc_Whl                 <= pc_Mhl;
+      wb_mux_out_Whl         <= wb_mux_out_Mhl;
     end
   end
 
@@ -471,24 +434,21 @@ module parc_CoreDpath
 
   // Multiplier/Divider
 
-  parc_CoreDpathPipeMulDiv imuldiv
+  imuldiv_IntMulDivIterative imuldiv
   (
     .clk                   (clk),
     .reset                 (reset),
     .muldivreq_msg_fn      (muldivreq_msg_fn_Xhl),
-    .muldivreq_msg_a       (op0_mux_out_Dhl),
-    .muldivreq_msg_b       (op1_mux_out_Dhl),
+    .muldivreq_msg_a       (op0_mux_out_Xhl),
+    .muldivreq_msg_b       (op1_mux_out_Xhl),
     .muldivreq_val         (muldivreq_val),
     .muldivreq_rdy         (muldivreq_rdy),
-    .muldivresp_msg_result (muldivresp_msg_result_X3hl),
+    .muldivresp_msg_result (muldivresp_msg_result_Xhl),
     .muldivresp_val        (muldivresp_val),
-    .muldivresp_rdy        (muldivresp_rdy), 
-    .stall_Xhl             (stall_Xhl),
-    .stall_Mhl             (stall_Mhl),
-    .stall_X2hl             (stall_X2hl),
-    .stall_X3hl             (stall_X3hl)
+    .muldivresp_rdy        (muldivresp_rdy)
   );
 
 endmodule
 
 `endif
+
