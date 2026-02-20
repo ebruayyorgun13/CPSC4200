@@ -5,7 +5,7 @@
 `ifndef PARC_CORE_DPATH_V
 `define PARC_CORE_DPATH_V
 
-`include "imuldiv-IntMulDivIterative.v"
+`include "pv2long-CoreDpathPipeMulDiv.v"
 `include "pv2long-InstMsg.v"
 `include "pv2long-CoreDpathAlu.v"
 `include "pv2long-CoreDpathRegfile.v"
@@ -432,17 +432,19 @@ module parc_CoreDpath
     .out  (alu_out_Xhl)
   );
 
-  // Multiplier/Divider
+  // 4-phase Multiplier/Divider
 
-  imuldiv_IntMulDivIterative imuldiv
+  parc_CoreDpathPipeMulDiv imuldiv
   (
     .clk                   (clk),
     .reset                 (reset),
+
     .muldivreq_msg_fn      (muldivreq_msg_fn_Xhl),
     .muldivreq_msg_a       (op0_mux_out_Xhl),
     .muldivreq_msg_b       (op1_mux_out_Xhl),
     .muldivreq_val         (muldivreq_val),
     .muldivreq_rdy         (muldivreq_rdy),
+
     .muldivresp_msg_result (muldivresp_msg_result_Xhl),
     .muldivresp_val        (muldivresp_val),
     .muldivresp_rdy        (muldivresp_rdy)
