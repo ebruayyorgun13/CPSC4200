@@ -66,8 +66,8 @@ module parc_CoreCtrl
   output reg [31:0] cp0_status,
 
   // Bypass
-  output reg [1:0] rs_byp_sel_Dhl,
-  output reg [1:0] rt_byp_sel_Dhl
+  output reg [2:0] rs_byp_sel_Dhl,
+  output reg [2:0] rt_byp_sel_Dhl
 );
 
   //----------------------------------------------------------------------
@@ -604,6 +604,19 @@ module parc_CoreCtrl
     && ( rs_addr_Dhl == rf_waddr_Whl )
     && ( rf_waddr_Whl != 5'd0 );
 
+  wire rs_X2_byp_Dhl =
+    rs_en_Dhl
+    && inst_val_X2hl
+    && rf_wen_X2hl
+    && ( rs_addr_Dhl == rf_waddr_X2hl )
+    && ( rf_waddr_X2hl != 5'd0 );
+  wire rs_X3_byp_Dhl =
+    rs_en_Dhl
+    && inst_val_X3hl
+    && rf_wen_X3hl
+    && ( rs_addr_Dhl == rf_waddr_X3hl )
+    && ( rf_waddr_X3hl != 5'd0 );
+
   // rt bypass conditions
   wire rt_X_byp_Dhl =
     rt_en_Dhl
@@ -623,20 +636,36 @@ module parc_CoreCtrl
     && rf_wen_Whl
     && ( rt_addr_Dhl == rf_waddr_Whl )
     && ( rf_waddr_Whl != 5'd0 );
+  
+  wire rt_X2_byp_Dhl =
+    rt_en_Dhl
+    && inst_val_X2hl
+    && rf_wen_X2hl
+    && ( rt_addr_Dhl == rf_waddr_X2hl )
+    && ( rf_waddr_X2hl != 5'd0 );
+  wire rt_X3_byp_Dhl =
+    rt_en_Dhl
+    && inst_val_X3hl
+    && rf_wen_X3hl
+    && ( rt_addr_Dhl == rf_waddr_X3hl )
+    && ( rf_waddr_X3hl != 5'd0 );
 
-    always @(*) begin
-      // rs priority: X > M > W
-      if      ( rs_X_byp_Dhl ) rs_byp_sel_Dhl = 2'd1;
-      else if ( rs_M_byp_Dhl ) rs_byp_sel_Dhl = 2'd2;
-      else if ( rs_W_byp_Dhl ) rs_byp_sel_Dhl = 2'd3;
-      else                     rs_byp_sel_Dhl = 2'd0;
-
-      // rt priority: X > M > W
-      if      ( rt_X_byp_Dhl ) rt_byp_sel_Dhl = 2'd1;
-      else if ( rt_M_byp_Dhl ) rt_byp_sel_Dhl = 2'd2;
-      else if ( rt_W_byp_Dhl ) rt_byp_sel_Dhl = 2'd3;
-      else                     rt_byp_sel_Dhl = 2'd0;
-    end
+  always @(*) begin
+    // rs priority: X > M > X2 > X3 > W
+    if      ( rs_X_byp_Dhl  ) rs_byp_sel_Dhl = 3'd1;
+    else if ( rs_M_byp_Dhl  ) rs_byp_sel_Dhl = 3'd2;
+    else if ( rs_X2_byp_Dhl ) rs_byp_sel_Dhl = 3'd3;
+    else if ( rs_X3_byp_Dhl ) rs_byp_sel_Dhl = 3'd4;
+    else if ( rs_W_byp_Dhl  ) rs_byp_sel_Dhl = 3'd5;
+    else                      rs_byp_sel_Dhl = 3'd0;
+    // rt priority: X > M > X2 > X3 > W
+    if      ( rt_X_byp_Dhl  ) rt_byp_sel_Dhl = 3'd1;
+    else if ( rt_M_byp_Dhl  ) rt_byp_sel_Dhl = 3'd2;
+    else if ( rt_X2_byp_Dhl ) rt_byp_sel_Dhl = 3'd3;
+    else if ( rt_X3_byp_Dhl ) rt_byp_sel_Dhl = 3'd4;
+    else if ( rt_W_byp_Dhl  ) rt_byp_sel_Dhl = 3'd5;
+    else                      rt_byp_sel_Dhl = 3'd0;
+  end
   
   //----------------------------------------------------------------------
   // X <- D
