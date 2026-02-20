@@ -54,15 +54,16 @@ module parc_CoreDpath
   input stall_X2hl,
   input stall_X3hl,
 
-  input  [1:0] rs_byp_sel_Dhl,
-  input  [1:0] rt_byp_sel_Dhl,
-
   // Control Signals (dpath->ctrl)
 
   output        branch_cond_eq_Xhl,
   output        branch_cond_zero_Xhl,
   output        branch_cond_neg_Xhl,
-  output [31:0] proc2cop_data_Whl
+  output [31:0] proc2cop_data_Whl,
+
+  // bypass
+  input  [2:0] rs_byp_sel_Dhl,
+  input  [2:0] rt_byp_sel_Dhl
 );
 
   //--------------------------------------------------------------------
@@ -171,20 +172,26 @@ module parc_CoreDpath
   wire [31:0] byp_X = execute_mux_out_Xhl;
   wire [31:0] byp_M = wb_mux_out_Mhl;
   wire [31:0] byp_W = wb_mux_out_Whl;
+  wire [31:0] byp_X2 = wb_mux_out_X2hl;
+  wire [31:0] byp_X3 = wb_mux_out_X3hl;
 
   // rs bypass mux
   wire [31:0] rs_byp_mux_out_Dhl
-    = ( rs_byp_sel_Dhl == 2'd0 ) ? rf_rdata0_Dhl
-    : ( rs_byp_sel_Dhl == 2'd1 ) ? byp_X
-    : ( rs_byp_sel_Dhl == 2'd2 ) ? byp_M
-    : ( rs_byp_sel_Dhl == 2'd3 ) ? byp_W
+    = ( rs_byp_sel_Dhl == 3'd0 ) ? rf_rdata0_Dhl
+    : ( rs_byp_sel_Dhl == 3'd1 ) ? byp_X
+    : ( rs_byp_sel_Dhl == 3'd2 ) ? byp_M
+    : ( rs_byp_sel_Dhl == 3'd3 ) ? byp_X2
+    : ( rs_byp_sel_Dhl == 3'd4 ) ? byp_X3
+    : ( rs_byp_sel_Dhl == 3'd5 ) ? byp_W
     :                              32'bx;
   // rt bypass mux
   wire [31:0] rt_byp_mux_out_Dhl
-    = ( rt_byp_sel_Dhl == 2'd0 ) ? rf_rdata1_Dhl
-    : ( rt_byp_sel_Dhl == 2'd1 ) ? byp_X
-    : ( rt_byp_sel_Dhl == 2'd2 ) ? byp_M
-    : ( rt_byp_sel_Dhl == 2'd3 ) ? byp_W
+    = ( rt_byp_sel_Dhl == 3'd0 ) ? rf_rdata1_Dhl
+    : ( rt_byp_sel_Dhl == 3'd1 ) ? byp_X
+    : ( rt_byp_sel_Dhl == 3'd2 ) ? byp_M
+    : ( rs_byp_sel_Dhl == 3'd3 ) ? byp_X2
+    : ( rs_byp_sel_Dhl == 3'd4 ) ? byp_X3
+    : ( rs_byp_sel_Dhl == 3'd5 ) ? byp_W
     :                              32'bx;
 
   // Jump reg address

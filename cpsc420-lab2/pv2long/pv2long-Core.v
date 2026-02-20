@@ -83,8 +83,8 @@ module parc_Core
   wire        branch_cond_neg_Xhl;
   wire [31:0] proc2cop_data_Whl;
   
-  wire [1:0] rs_byp_sel_Dhl;
-  wire [1:0] rt_byp_sel_Dhl;
+  wire [2:0] rs_byp_sel_Dhl;
+  wire [2:0] rt_byp_sel_Dhl;
 
   //----------------------------------------------------------------------
   // Pack Memory Request Messages
