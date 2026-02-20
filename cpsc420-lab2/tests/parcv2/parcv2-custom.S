@@ -6,46 +6,55 @@
 
         TEST_PARC_BEGIN
 
-        //--------------------------------------------------------------------
-        // Setup memory value
-        //--------------------------------------------------------------------
+        //-----------------------------------------------------------------
+        // X → D bypass: pure ALU-to-ALU dependency
+        //
+        //   addiu $2,$0,10     ; $2 = 10
+        //   addiu $3,$0,5      ; $3 = 5
+        //   addu  $1,$2,$3     ; $1 = 15   (producer in X)
+        //   addu  $4,$1,$3     ; $4 = 20   (consumer in D, needs X→D bypass)
+        //-----------------------------------------------------------------
 
-        // Put address 0x00001000 into r2
-        lui   r2, 0x0000
-        ori   r2, r2, 0x1000
+        addiu $2, $0, 10
+        addiu $3, $0, 5
+        addu  $1, $2, $3
+        addu  $4, $1, $3
 
-        // Store 42 into memory at 0x1000
-        addiu r1, r0, 42
-        sw    r1, 0(r2)
+        TEST_CHECK_EQ( $4, 20 )
 
-        //--------------------------------------------------------------------
-        // Critical load-use bypass test
-        //--------------------------------------------------------------------
+        //-----------------------------------------------------------------
+        // M → D / W → D style reuse of the same producer
+        //
+        // Keep using $1 (15) as a source in back-to-back instructions.
+        // Each consumer sits behind the previous one in the pipe, so over
+        // time it will see the value of $1 as it flows through X/M/W and
+        // must be forwarded correctly at each point.
+        //-----------------------------------------------------------------
 
-        // Load 42 into r5
-        lw    r5, 0(r2)
+        addu  $5, $1, $3 // expected 20
+        TEST_CHECK_EQ( $5, 20 )
 
-        // Immediately use r5 (forces load-use + M bypass)
-        addiu r6, r0, 8
-        addu  r7, r5, r6      // Expect 42 + 8 = 50
+        addu  $6, $1, $3 // expected 20
+        TEST_CHECK_EQ( $6, 20 )
 
-        //--------------------------------------------------------------------
-        // Verify result
-        //--------------------------------------------------------------------
+        //-----------------------------------------------------------------
+        // Load-use hazard + M-bypass on load result
+        //
+        //   addiu $7,$0,100     ; base addr
+        //   sw    $2,0($7)      ; store 10
+        //   lw    $8,0($7)      ; load -> load-use hazard
+        //   addu  $9,$8,$3      ; 10 + 5 = 15, must see loaded data
+        //
+        // Our design will:
+        //   - stall one cycle for the load-use (X load / D consumer),
+        //   - then use M/W bypass path so $8’s value feeds $9.
+        //-----------------------------------------------------------------
 
-        addiu r8, r0, 50
-        bne   r7, r8, fail
+        addiu $7, $0, 100
+        sw    $2, 0($7)
+        lw    $8, 0($7)
+        addu  $9, $8, $3
 
-        //--------------------------------------------------------------------
-        // Pass
-        //--------------------------------------------------------------------
-
-        addiu r10, r0, 1
-        mtc0  r10, r0
-        nop
-        nop
-
-fail:
-        mtc0 r0, r0
+        TEST_CHECK_EQ( $9, 15 )
 
         TEST_PARC_END
