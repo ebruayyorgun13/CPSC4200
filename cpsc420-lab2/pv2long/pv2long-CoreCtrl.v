@@ -810,6 +810,7 @@ module parc_CoreCtrl
   always @ ( posedge clk ) begin
     if ( reset ) begin
       bubble_Mhl <= 1'b1;
+      dmemreq_val_Mhl <= 1'b0;
     end
     else if( !stall_Mhl ) begin
       ir_Mhl               <= ir_Xhl;
@@ -821,8 +822,9 @@ module parc_CoreCtrl
       cp0_addr_Mhl         <= cp0_addr_Xhl;
 
       bubble_Mhl           <= bubble_next_Xhl;
+      dmemreq_val_Mhl      <= dmemreq_val_Xhl;
     end
-    dmemreq_val_Mhl <= dmemreq_val;
+    // hold state while stalled
   end
 
   // Add flag to track whether insn in X is muldiv
@@ -846,16 +848,28 @@ module parc_CoreCtrl
   // Data memory queue control signals
 
   assign dmemresp_queue_en_Mhl = ( stall_Mhl && dmemresp_val );
-  wire   dmemresp_queue_val_next_Mhl
-    = stall_Mhl && ( dmemresp_val || dmemresp_queue_val_Mhl );
+  wire   dmemresp_queue_val_next_Mhl = stall_Mhl && ( dmemresp_val || dmemresp_queue_val_Mhl );
+  
+  // queue valid register
+  always @(posedge clk) begin
+    if ( reset ) begin
+      dmemresp_queue_val_Mhl <= 1'b0;
+    end
+    else begin
+      dmemresp_queue_val_Mhl <= dmemresp_queue_val_next_Mhl;
+    end
+  end
 
   // Dummy Squash Signal
 
   wire squash_Mhl = 1'b0;
 
+  // effective response valid?
+  wire dmemresp_eff_val_Mhl = dmemresp_val || dmemresp_queue_val_Mhl;
+
   // Stall in M if memory response is not returned for a valid request
 
-  wire stall_dmem_Mhl = ( !reset && dmemreq_val_Mhl && inst_val_Mhl && !dmemresp_val );
+  wire stall_dmem_Mhl = ( !reset && dmemreq_val_Mhl && inst_val_Mhl && !dmemresp_eff_val_Mhl );
   wire stall_imem_Mhl = ( !reset && imemreq_val_Fhl && inst_val_Fhl && !imemresp_val );
 
   // Aggregate Stall Signal
