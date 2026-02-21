@@ -189,9 +189,9 @@ module parc_CoreDpath
     = ( rt_byp_sel_Dhl == 3'd0 ) ? rf_rdata1_Dhl
     : ( rt_byp_sel_Dhl == 3'd1 ) ? byp_X
     : ( rt_byp_sel_Dhl == 3'd2 ) ? byp_M
-    : ( rs_byp_sel_Dhl == 3'd3 ) ? byp_X2
-    : ( rs_byp_sel_Dhl == 3'd4 ) ? byp_X3
-    : ( rs_byp_sel_Dhl == 3'd5 ) ? byp_W
+    : ( rt_byp_sel_Dhl == 3'd3 ) ? byp_X2
+    : ( rt_byp_sel_Dhl == 3'd4 ) ? byp_X3
+    : ( rt_byp_sel_Dhl == 3'd5 ) ? byp_W
     :                              32'bx;
 
   // Jump reg address
@@ -215,7 +215,6 @@ module parc_CoreDpath
   wire [31:0] const16   = 32'd16;
 
   // Operand 0 mux
-
   wire [31:0] op0_mux_out_Dhl
     = ( op0_mux_sel_Dhl == 2'd0 ) ? rs_byp_mux_out_Dhl
     : ( op0_mux_sel_Dhl == 2'd1 ) ? shamt_Dhl
@@ -224,7 +223,6 @@ module parc_CoreDpath
     :                               32'bx;
 
   // Operand 1 mux
-
   wire [31:0] op1_mux_out_Dhl
     = ( op1_mux_sel_Dhl == 3'd0 ) ? rt_byp_mux_out_Dhl
     : ( op1_mux_sel_Dhl == 3'd1 ) ? imm_zext_Dhl
