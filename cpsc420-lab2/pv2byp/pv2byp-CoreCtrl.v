@@ -338,6 +338,8 @@ module parc_CoreCtrl
     is_load_Xhl &&
     ( rf_waddr_Xhl != 5'd0 ) &&
     ( rf_waddr_Xhl == rt_addr_Dhl );
+    
+  wire stall_load_use_Dhl;
 
   assign stall_load_use_Dhl =
     load_use_rs_Dhl || load_use_rt_Dhl;

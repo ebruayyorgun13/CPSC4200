@@ -20,12 +20,7 @@ module parc_CoreDpathPipeMulDiv
 
   output [63:0] muldivresp_msg_result,
   output        muldivresp_val,
-  input         muldivresp_rdy,
-  //These need to be hooked up to something!
-  input         stall_Xhl,
-  input         stall_Mhl,
-  input         stall_X2hl,
-  input         stall_X3hl
+  input         muldivresp_rdy
 );
 
   // Set request ready if not stalled
@@ -40,55 +35,22 @@ module parc_CoreDpathPipeMulDiv
   reg  [2:0] fn_reg;
   reg [31:0] a_reg;
   reg [31:0] b_reg;
-  reg [63:0] result1_reg;
-  reg [63:0] result2_reg;
-  reg [63:0] result3_reg;
-  
   reg        val0_reg;
-  reg        val1_reg;
-  reg        val2_reg;
-  reg        val3_reg;
-  wire val1_next = (stall_Xhl) ? 1'b0: (val0_reg);
-  wire val2_next = (stall_Mhl) ? 1'b0: (val1_reg);
- 
+
   always @ ( posedge clk ) begin
-    if ( reset ) begin
-      fn_reg <= 0;
-      a_reg <= 0;
-      b_reg <= 0;
-      val0_reg <= 0;
-      result1_reg <= 0;
-      result2_reg <= 0;
-      result3_reg <= 0;
-  
-      val0_reg <= 0;
-      val1_reg <= 0;
-      val2_reg <= 0;
-      val3_reg <= 0;
-    end else begin
+    if ( !reset ) begin
       if ( muldivreq_go ) begin
         fn_reg   <= muldivreq_msg_fn;
         a_reg    <= muldivreq_msg_a;
         b_reg    <= muldivreq_msg_b;
         val0_reg <= 1'b1;
-      end else if (!stall_Xhl) begin
+      end
+      else if ( !stall ) begin
         val0_reg <= 1'b0;
-      end
-      if (! stall_Mhl) begin
-          result1_reg <= result0;
-          val1_reg <= val1_next;
-      end
-      if ( !stall  ) begin
-        result2_reg <= result1_reg;
-        result3_reg <= result2_reg;
-        val2_reg    <= val2_next;
-        val3_reg    <= val2_reg;
       end
     end
   end
-  
 
- 
   //----------------------------------------------------------------------
   // Functional Computation
   //----------------------------------------------------------------------
@@ -147,7 +109,26 @@ module parc_CoreDpathPipeMulDiv
   // Dummy Pipeline Stages
   //----------------------------------------------------------------------
 
-  
+  reg [63:0] result1_reg;
+  reg [63:0] result2_reg;
+  reg [63:0] result3_reg;
+  reg        val1_reg;
+  reg        val2_reg;
+  reg        val3_reg;
+
+  always @ ( posedge clk ) begin
+    if ( !reset ) begin
+      if ( !stall ) begin
+        result1_reg <= result0;
+        result2_reg <= result1_reg;
+        result3_reg <= result2_reg;
+        val1_reg    <= val0_reg;
+        val2_reg    <= val1_reg;
+        val3_reg    <= val2_reg;
+      end
+    end
+  end
+
   // Set response data
 
   assign muldivresp_msg_result = result3_reg;
