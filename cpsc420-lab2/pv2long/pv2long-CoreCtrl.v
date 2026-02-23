@@ -38,8 +38,8 @@ module parc_CoreCtrl
   input             muldivreq_rdy,
   input             muldivresp_val,
   output            muldivresp_rdy,
-  output reg        muldiv_mux_sel_Xhl,
-  output reg        execute_mux_sel_Xhl,
+  output reg        muldiv_mux_sel_X3hl,
+  output reg        execute_mux_sel_X3hl,
   output reg [2:0]  dmemresp_mux_sel_Mhl,
   output            dmemresp_queue_en_Mhl,
   output reg        dmemresp_queue_val_Mhl,
@@ -343,6 +343,7 @@ module parc_CoreCtrl
     is_load_Xhl &&
     ( rf_waddr_Xhl != 5'd0 ) &&
     ( rf_waddr_Xhl == rt_addr_Dhl );
+    
 
   assign stall_load_use_Dhl =
     load_use_rs_Dhl || load_use_rt_Dhl;
@@ -402,8 +403,8 @@ module parc_CoreCtrl
 
       `PARC_INST_MSG_ADDU    :cs={ y,  n,    br_none, pm_p,   am_rdat, y, bm_rdat, y, alu_add,  md_x,    n, mdm_x, em_alu, nr,  ml_x, dmm_x,  wm_alu, y,  rd, n   };
 
-      `PARC_INST_MSG_LW      :cs={ y,  n,    br_none, pm_p,   am_rdat, y, bm_si,   n, alu_add,  md_x,    n, mdm_x, em_x,   ld,  ml_w, dmm_w,  wm_mem, y,  rt, n   };
-      `PARC_INST_MSG_SW      :cs={ y,  n,    br_none, pm_p,   am_rdat, y, bm_si,   y, alu_add,  md_x,    n, mdm_x, em_x,   st,  ml_w, dmm_w,  wm_mem, n,  rx, n   };
+      `PARC_INST_MSG_LW      :cs={ y,  n,    br_none, pm_p,   am_rdat, y, bm_si,   n, alu_add,  md_x,    n, mdm_x, em_alu,   ld,  ml_w, dmm_w,  wm_mem, y,  rt, n   };
+      `PARC_INST_MSG_SW      :cs={ y,  n,    br_none, pm_p,   am_rdat, y, bm_si,   y, alu_add,  md_x,    n, mdm_x, em_alu,   st,  ml_w, dmm_w,  wm_mem, n,  rx, n   };
 
       `PARC_INST_MSG_JAL     :cs={ y,  y,    br_none, pm_j,   am_0,    n, bm_pc,   n, alu_add,  md_x,    n, mdm_x, em_alu, nr,  ml_x, dmm_x,  wm_alu, y,  rL, n   };
       `PARC_INST_MSG_JR      :cs={ y,  y,    br_none, pm_r,   am_x,    y, bm_x,    n, alu_x,    md_x,    n, mdm_x, em_x,   nr,  ml_x, dmm_x,  wm_x,   n,  rx, n   };
@@ -411,7 +412,7 @@ module parc_CoreCtrl
 
       `PARC_INST_MSG_MTC0    :cs={ y,  n,    br_none, pm_p,   am_0,    n, bm_rdat, y, alu_add,  md_x,    n, mdm_x, em_alu, nr,  ml_x, dmm_x,  wm_alu, n,  rx, y   };
 
-      `PARC_INST_MSG_LH      :cs={ y, n, br_none, pm_p, am_rdat, y, bm_si, n, alu_add, md_x, n, mdm_x, em_x, ld, ml_h, dmm_h, wm_mem, y, rt, n };
+      `PARC_INST_MSG_LH      :cs={ y, n, br_none, pm_p, am_rdat, y, bm_si, n, alu_add, md_x, n, mdm_x, em_alu, ld, ml_h, dmm_h, wm_mem, y, rt, n };
 
       `PARC_INST_MSG_ANDI     :cs={ y,  n,    br_none, pm_p,   am_rdat, y, bm_zi,   n, alu_and,   md_x,    n, mdm_x, em_alu, nr,  ml_x, dmm_x,  wm_alu, y,  rt, n   };
       `PARC_INST_MSG_XORI     :cs={ y,  n,    br_none, pm_p,   am_rdat, y, bm_zi,   n, alu_xor,   md_x,    n, mdm_x, em_alu, nr,  ml_x, dmm_x,  wm_alu, y,  rt, n   };
@@ -438,11 +439,11 @@ module parc_CoreCtrl
       `PARC_INST_MSG_DIVU     :cs={ y,  n,    br_none, pm_p,   am_rdat, y, bm_rdat,   y, alu_x,   md_divu,    y, mdm_l, em_md, nr,  ml_x, dmm_x,  wm_alu, y,  rd, n   };
       `PARC_INST_MSG_REM     :cs={ y,  n,    br_none, pm_p,   am_rdat, y, bm_rdat,   y, alu_x,   md_rem,    y, mdm_u, em_md, nr,  ml_x, dmm_x,  wm_alu, y,  rd, n   };
       `PARC_INST_MSG_REMU     :cs={ y,  n,    br_none, pm_p,   am_rdat, y, bm_rdat,   y, alu_x,   md_remu,    y, mdm_u, em_md, nr,  ml_x, dmm_x,  wm_alu, y,  rd, n   };
-      `PARC_INST_MSG_LB     :cs={ y,  n,    br_none, pm_p,   am_rdat, y, bm_si,   n, alu_add,   md_x,    n, mdm_x, em_x, ld,  ml_b, dmm_b,  wm_mem, y,  rt, n   };
-      `PARC_INST_MSG_LBU     :cs={ y,  n,    br_none, pm_p,   am_rdat, y, bm_si,   n, alu_add,   md_x,    n, mdm_x, em_x, ld,  ml_b, dmm_bu,  wm_mem, y,  rt, n   };
-      `PARC_INST_MSG_LHU      :cs={ y, n, br_none, pm_p, am_rdat, y, bm_si, n, alu_add, md_x, n, mdm_x, em_x, ld, ml_h, dmm_hu, wm_mem, y, rt, n };
-      `PARC_INST_MSG_SB      :cs={ y, n, br_none, pm_p, am_rdat, y, bm_si, y, alu_add, md_x, n, mdm_x, em_x, st, ml_b, dmm_x, wm_mem, n, rt, n };
-      `PARC_INST_MSG_SH      :cs={ y, n, br_none, pm_p, am_rdat, y, bm_si, y, alu_add, md_x, n, mdm_x, em_x, st, ml_h, dmm_x, wm_mem, n, rt, n };
+      `PARC_INST_MSG_LB     :cs={ y,  n,    br_none, pm_p,   am_rdat, y, bm_si,   n, alu_add,   md_x,    n, mdm_x, em_alu, ld,  ml_b, dmm_b,  wm_mem, y,  rt, n   };
+      `PARC_INST_MSG_LBU     :cs={ y,  n,    br_none, pm_p,   am_rdat, y, bm_si,   n, alu_add,   md_x,    n, mdm_x, em_alu, ld,  ml_b, dmm_bu,  wm_mem, y,  rt, n   };
+      `PARC_INST_MSG_LHU      :cs={ y, n, br_none, pm_p, am_rdat, y, bm_si, n, alu_add, md_x, n, mdm_x, em_alu, ld, ml_h, dmm_hu, wm_mem, y, rt, n };
+      `PARC_INST_MSG_SB      :cs={ y, n, br_none, pm_p, am_rdat, y, bm_si, y, alu_add, md_x, n, mdm_x, em_alu, st, ml_b, dmm_x, wm_mem, n, rt, n };
+      `PARC_INST_MSG_SH      :cs={ y, n, br_none, pm_p, am_rdat, y, bm_si, y, alu_add, md_x, n, mdm_x, em_alu, st, ml_h, dmm_x, wm_mem, n, rt, n };
 
       `PARC_INST_MSG_J       :cs={ y,  y,    br_none, pm_j,   am_x,    n, bm_x,    n, alu_x,    md_x,    n, mdm_x, em_x,   nr,  ml_x, dmm_x, wm_x,    n,  rx, n   };
       `PARC_INST_MSG_JALR    :cs={ y,  y,    br_none, pm_r,   am_0,    y, bm_pc,   n, alu_add,  md_x,    n, mdm_x, em_alu, nr,  ml_x, dmm_x, wm_alu,  y,  rd, n   };
@@ -676,8 +677,8 @@ module parc_CoreCtrl
   // reg  [3:0] alu_fn_Xhl; (declared as output)
   reg        muldivreq_val_Xhl;
   // reg  [2:0] muldivreq_msg_fn_Xhl; (declared as output)
-  // reg        muldiv_mux_sel_Xhl; (declared as output)
-  // reg        execute_mux_sel_Xhl; (declared as output)
+  reg        muldiv_mux_sel_Xhl; 
+  reg        execute_mux_sel_Xhl; 
   reg        dmemreq_msg_rw_Xhl;
   reg  [1:0] dmemreq_msg_len_Xhl;
   reg        dmemreq_val_Xhl;
@@ -730,7 +731,7 @@ module parc_CoreCtrl
   // Muldiv request
 
   assign muldivreq_val = muldivreq_val_Xhl && inst_val_Xhl;
-  assign muldivresp_rdy = !stall_Xhl;
+  assign muldivresp_rdy = !stall_Whl;
 
   // Only send a valid dmem request if not stalled
 
@@ -804,6 +805,8 @@ module parc_CoreCtrl
   reg  [4:0] cp0_addr_Mhl;
 
   reg        bubble_Mhl;
+  reg muldiv_mux_sel_Mhl;
+  reg execute_mux_sel_Mhl;
 
   // Pipeline Controls
 
@@ -823,6 +826,8 @@ module parc_CoreCtrl
 
       bubble_Mhl           <= bubble_next_Xhl;
       dmemreq_val_Mhl      <= dmemreq_val_Xhl;
+      muldiv_mux_sel_Mhl <= muldiv_mux_sel_Xhl;
+      execute_mux_sel_Mhl <= execute_mux_sel_Xhl;
     end
     // hold state while stalled
   end
@@ -898,6 +903,9 @@ module parc_CoreCtrl
   reg [4:0] cp0_addr_X2hl;
   reg bubble_X2hl;
 
+  reg execute_mux_sel_X2hl;
+  reg muldiv_mux_sel_X2hl;
+
   always @(posedge clk) begin
     if (reset)
       bubble_X2hl <= 1'b1;
@@ -908,6 +916,8 @@ module parc_CoreCtrl
       cp0_wen_X2hl  <= cp0_wen_Mhl;
       cp0_addr_X2hl <= cp0_addr_Mhl;
       bubble_X2hl   <= bubble_next_Mhl;
+      execute_mux_sel_X2hl <= execute_mux_sel_Mhl;
+      muldiv_mux_sel_X2hl <= muldiv_mux_sel_Mhl;
     end
   end
 
@@ -933,6 +943,7 @@ module parc_CoreCtrl
   reg [4:0] cp0_addr_X3hl;
   reg bubble_X3hl;
 
+
   always @(posedge clk) begin
     if (reset)
       bubble_X3hl <= 1'b1;
@@ -943,6 +954,8 @@ module parc_CoreCtrl
       cp0_wen_X3hl  <= cp0_wen_X2hl;
       cp0_addr_X3hl <= cp0_addr_X2hl;
       bubble_X3hl   <= bubble_X2hl;
+      execute_mux_sel_X3hl <= execute_mux_sel_X2hl;
+      muldiv_mux_sel_X3hl <= muldiv_mux_sel_X2hl;
     end
   end
 

@@ -37,8 +37,8 @@ module parc_CoreDpath
   output        muldivreq_rdy,
   output        muldivresp_val,
   input         muldivresp_rdy,
-  input         muldiv_mux_sel_Xhl,
-  input         execute_mux_sel_Xhl,
+  input         muldiv_mux_sel_X3hl,
+  input         execute_mux_sel_X3hl,
   input   [2:0] dmemresp_mux_sel_Mhl,
   input         dmemresp_queue_en_Mhl,
   input         dmemresp_queue_val_Mhl,
@@ -280,17 +280,19 @@ module parc_CoreDpath
 
   // Muldiv Result Mux
 
-  wire [31:0] muldiv_mux_out_Xhl
-    = ( muldiv_mux_sel_Xhl == 1'd0 ) ? muldivresp_msg_result_Xhl[31:0]
-    : ( muldiv_mux_sel_Xhl == 1'd1 ) ? muldivresp_msg_result_Xhl[63:32]
+  wire [31:0] muldiv_mux_out_X3hl
+    = ( muldiv_mux_sel_X3hl == 1'd0 ) ? muldivresp_msg_result_Xhl[31:0]
+    : ( muldiv_mux_sel_X3hl == 1'd1 ) ? muldivresp_msg_result_Xhl[63:32]
     :                                  32'bx;
 
   // Execute Result Mux
 
-  wire [31:0] execute_mux_out_Xhl
+  /* wire [31:0] execute_mux_out_Xhl
     = ( execute_mux_sel_Xhl == 1'd0 ) ? alu_out_Xhl
     : ( execute_mux_sel_Xhl == 1'd1 ) ? muldiv_mux_out_Xhl
-    :                                   32'bx;
+    :                                   32'bx; */
+
+  wire [31:0] execute_mux_out_Xhl = alu_out_Xhl;
 
   //----------------------------------------------------------------------
   // M <- X
@@ -383,14 +385,19 @@ module parc_CoreDpath
   //----------------------------------------------------------------------
 
   reg [31:0] pc_X3hl;
-  reg [31:0] wb_mux_out_X3hl;
+  reg [31:0] execute_mux_out_X3hl;
 
   always @(posedge clk) begin
     if ( !stall_X3hl ) begin   // still using stall_Mhl for now
       pc_X3hl         <= pc_X2hl;
-      wb_mux_out_X3hl <= wb_mux_out_X2hl;
+      execute_mux_out_X3hl <= wb_mux_out_X2hl;
     end
   end
+
+  wire [31:0] wb_mux_out_X3hl = (execute_mux_sel_X3hl == 1'd0) ? execute_mux_out_X3hl
+                              : (execute_mux_sel_X3hl == 1'd1) ? muldiv_mux_out_X3hl : 32'bx;
+
+
 
   //----------------------------------------------------------------------
   // W <- X3
