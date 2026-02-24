@@ -810,7 +810,7 @@ module parc_CoreCtrl
   // Aggregate Stall Signal
 
   assign stall_Xhl = ( stall_Mhl 
-                      // || stall_muldiv_Xhl 
+                      || stall_muldiv_Xhl 
                       || stall_imem_Xhl 
                       || stall_dmem_Xhl );
 
