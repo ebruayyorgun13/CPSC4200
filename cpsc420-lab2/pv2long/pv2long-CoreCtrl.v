@@ -542,8 +542,8 @@ module parc_CoreCtrl
   || ( muldivreq_val_X2hl && inst_val_X2hl )
   || ( muldivreq_val_X3hl && inst_val_X3hl );
 
-  wire stall_muldiv_Dhl = muldiv_inflight;
-  // wire stall_muldiv_Dhl = ( muldivreq_val_Xhl && inst_val_Xhl && !muldivresp_val );
+  // wire stall_muldiv_Dhl = muldiv_inflight;
+  wire stall_muldiv_Dhl = ( muldivreq_val_Xhl && inst_val_Xhl && !muldivresp_val );
 
   // Stall for data hazards if either of the operand read addresses are
   // the same as the write addresses of instruction later in the pipeline
@@ -749,16 +749,47 @@ module parc_CoreCtrl
   // wire brj_taken_Xhl = ( inst_val_Xhl && any_br_taken_Xhl );
 
   // NEW BRANCH RESOLUTION
-  wire beq_taken_Xhl  = ( ( br_sel_Xhl == br_beq  ) &&  branch_cond_eq_Xhl );
-  wire bne_taken_Xhl  = ( ( br_sel_Xhl == br_bne  ) && ~branch_cond_eq_Xhl );
-  wire blez_taken_Xhl = ( ( br_sel_Xhl == br_blez ) && ( branch_cond_neg_Xhl || branch_cond_zero_Xhl ) );
-  wire bgtz_taken_Xhl = ( ( br_sel_Xhl == br_bgtz ) && ~( branch_cond_neg_Xhl || branch_cond_zero_Xhl ) );
-  wire bltz_taken_Xhl = ( ( br_sel_Xhl == br_bltz ) &&  branch_cond_neg_Xhl );
-  wire bgez_taken_Xhl = ( ( br_sel_Xhl == br_bgez ) && ~branch_cond_neg_Xhl );
+  // wire beq_taken_Xhl  = ( ( br_sel_Xhl == br_beq  ) &&  branch_cond_eq_Xhl );
+  // wire bne_taken_Xhl  = ( ( br_sel_Xhl == br_bne  ) && ~branch_cond_eq_Xhl );
+  // wire blez_taken_Xhl = ( ( br_sel_Xhl == br_blez ) && ( branch_cond_neg_Xhl || branch_cond_zero_Xhl ) );
+  // wire bgtz_taken_Xhl = ( ( br_sel_Xhl == br_bgtz ) && ~( branch_cond_neg_Xhl || branch_cond_zero_Xhl ) );
+  // wire bltz_taken_Xhl = ( ( br_sel_Xhl == br_bltz ) &&  branch_cond_neg_Xhl );
+  // wire bgez_taken_Xhl = ( ( br_sel_Xhl == br_bgez ) && ~branch_cond_neg_Xhl );
 
-  wire any_br_taken_Xhl = beq_taken_Xhl  || bne_taken_Xhl || blez_taken_Xhl || bgtz_taken_Xhl || bltz_taken_Xhl || bgez_taken_Xhl;
+  // wire any_br_taken_Xhl = beq_taken_Xhl  || bne_taken_Xhl || blez_taken_Xhl || bgtz_taken_Xhl || bltz_taken_Xhl || bgez_taken_Xhl;
 
-  wire brj_taken_Xhl = ( inst_val_Xhl && any_br_taken_Xhl );
+  // wire brj_taken_Xhl = ( inst_val_Xhl && any_br_taken_Xhl );
+
+  // NEW NEW BRANCH RESOLUTION
+  wire beq_taken_Xhl  = inst_val_Xhl &&
+                        (br_sel_Xhl == br_beq ) &&
+                        branch_cond_eq_Xhl;
+
+  wire bne_taken_Xhl  = inst_val_Xhl &&
+                        (br_sel_Xhl == br_bne ) &&
+                      ~branch_cond_eq_Xhl;
+
+  wire blez_taken_Xhl = inst_val_Xhl &&
+                        (br_sel_Xhl == br_blez) &&
+                        ( branch_cond_neg_Xhl || branch_cond_zero_Xhl );
+
+  wire bgtz_taken_Xhl = inst_val_Xhl &&
+                        (br_sel_Xhl == br_bgtz) &&
+                        ~( branch_cond_neg_Xhl || branch_cond_zero_Xhl );
+
+  wire bltz_taken_Xhl = inst_val_Xhl &&
+                        (br_sel_Xhl == br_bltz) &&
+                        branch_cond_neg_Xhl;
+
+  wire bgez_taken_Xhl = inst_val_Xhl &&
+                        (br_sel_Xhl == br_bgez) &&
+                      ~branch_cond_neg_Xhl;
+
+  wire any_br_taken_Xhl = beq_taken_Xhl  || bne_taken_Xhl
+                        || blez_taken_Xhl || bgtz_taken_Xhl
+                        || bltz_taken_Xhl || bgez_taken_Xhl;
+
+  wire brj_taken_Xhl = any_br_taken_Xhl;
 
   // Dummy Squash Signal
 
@@ -770,7 +801,7 @@ module parc_CoreCtrl
 
   // Stall in X if imem is not ready
 
-  // wire stall_imem_Xhl = !imemreq_rdy;
+  wire stall_imem_Xhl = !imemreq_rdy;
 
   // Stall in X if dmem is not ready and there was a valid request
 
@@ -779,8 +810,8 @@ module parc_CoreCtrl
   // Aggregate Stall Signal
 
   assign stall_Xhl = ( stall_Mhl 
-                      || stall_muldiv_Xhl 
-                      // || stall_imem_Xhl 
+                      // || stall_muldiv_Xhl 
+                      || stall_imem_Xhl 
                       || stall_dmem_Xhl );
 
   // Next bubble bit
@@ -877,8 +908,11 @@ module parc_CoreCtrl
   assign stall_Mhl = ( stall_imem_Mhl || stall_dmem_Mhl );
 
   // X2 and X3 Stall Logic
-  assign stall_X2hl = stall_X3hl;
-  assign stall_X3hl = stall_Whl;
+  // assign stall_X2hl = stall_X3hl;
+  // assign stall_X3hl = stall_Whl;
+  assign stall_X2hl = stall_Mhl;
+  assign stall_X3hl = stall_X2hl;
+  assign stall_Whl  = 1'b0;
 
   // Next bubble bit
 
