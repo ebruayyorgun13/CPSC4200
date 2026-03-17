@@ -959,7 +959,7 @@ module parc_CoreCtrl
 
   // Aggregate Stall Signal
 
-  assign stall_Dhl = (stall_X0hl || stall_0_muldiv_use_Dhl || stall_0_load_use_Dhl || !steering_mux_sel);
+  assign stall_Dhl = (stall_X0hl || stall_0_muldiv_use_Dhl || stall_0_load_use_Dhl);
   // Next bubble bit
 
   wire bubble_sel_Dhl  = ( squash_Dhl || stall_Dhl );
