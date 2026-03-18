@@ -576,7 +576,7 @@ module parc_CoreCtrl
 
   // Steering Logic
 
-  reg steering_mux_sel = 1'b0;
+  reg steering_mux_sel;
 
   assign instB_Dhl = 32'b0; // no instruction sent ot B for this part
 
@@ -584,7 +584,7 @@ module parc_CoreCtrl
 
   always@(posedge clk) begin
     if (reset) begin
-      steering_mux_sel <= 1'b0;
+      steering_mux_sel <= 1'b1;
     end
     else if (!stall_Dhl) begin
       steering_mux_sel <= ~steering_mux_sel;
@@ -629,8 +629,11 @@ module parc_CoreCtrl
 
   // Operand Bypassing Logic
 
-  wire [4:0] rs0_addr_Dhl  = inst0_rs_Dhl;
-  wire [4:0] rt0_addr_Dhl  = inst0_rt_Dhl;
+  //wire [4:0] rs0_addr_Dhl  = inst0_rs_Dhl;
+  //wire [4:0] rt0_addr_Dhl  = inst0_rt_Dhl;
+
+  wire [4:0] rs0_addr_Dhl  = (steering_mux_sel == 1'b0) ? inst0_rs_Dhl : inst1_rs_Dhl;
+  wire [4:0] rt0_addr_Dhl  = (steering_mux_sel == 1'b0) ? inst0_rt_Dhl : inst1_rt_Dhl;
 
   wire [4:0] rs1_addr_Dhl  = inst1_rs_Dhl;
   wire [4:0] rt1_addr_Dhl  = inst1_rt_Dhl;
@@ -815,7 +818,7 @@ module parc_CoreCtrl
   // ALU Function
 
   wire [3:0] alu0_fn_Dhl = curr_cs[`PARC_INST_MSG_ALU_FN];
-  assign aluA_fn_X0hl = curr_cs[`PARC_INST_MSG_ALU_FN];
+  assign aluA_fn_X0hl = alu0_fn_X0hl;
   assign aluB_fn_X0hl = 4'b0;
 
   // Muldiv Function
@@ -860,7 +863,8 @@ module parc_CoreCtrl
 
   // Coprocessor register specifier
 
-  wire [4:0] cp0_addr_Dhl = inst0_rd_Dhl;
+  //wire [4:0] cp0_addr_Dhl = inst0_rd_Dhl;
+  wire [4:0] cp0_addr_Dhl = (steering_mux_sel == 1'b0) ? inst0_rd_Dhl : inst1_rd_Dhl;
 
   //----------------------------------------------------------------------
   // Squash and Stall Logic
