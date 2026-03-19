@@ -172,11 +172,11 @@ module parc_CoreCtrl
   // Queue for instruction memory response
   //----------------------------------------------------------------------
 
-  wire imemresp0_queue_en_Fhl = ( stall_Dhl || !steering_mux_sel && imemresp0_val );
+  wire imemresp0_queue_en_Fhl = ( (stall_Dhl || !steering_mux_sel) && imemresp0_val );
   wire imemresp0_queue_val_next_Fhl
     = (stall_Dhl || !steering_mux_sel) && ( imemresp0_val || imemresp0_queue_val_Fhl );
 
-  wire imemresp1_queue_en_Fhl = ( stall_Dhl || !steering_mux_sel && imemresp1_val );
+  wire imemresp1_queue_en_Fhl = ( (stall_Dhl || !steering_mux_sel) && imemresp1_val );
   wire imemresp1_queue_val_next_Fhl
     = (stall_Dhl || !steering_mux_sel) && ( imemresp1_val || imemresp1_queue_val_Fhl );
 
