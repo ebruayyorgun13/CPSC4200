@@ -130,7 +130,7 @@ module parc_CoreCtrl
 
       bubble_Fhl <= 1'b0;
     end
-    else if( !stall_Fhl ) begin 
+    else if( !stall_Fhl) begin 
       imemreq_val_Fhl <= imemreq_val_Phl;
 
       bubble_Fhl <= bubble_next_Phl;
@@ -152,14 +152,14 @@ module parc_CoreCtrl
   // instruction or if there was an exception in X stage
 
   wire squash_Fhl
-    = ( inst_val_Dhl && brj_taken_Dhl )
+    = ( inst_val_Dhl && brj_taken_Dhl)
    || ( inst_val_X0hl && brj_taken_X0hl );
 
   // Stall in F if D is stalled
 
   //assign stall_Fhl = stall_Dhl;
   // Fetch stalls when it is in the middle of steering the second instruction
-  assign stall_Fhl = (!steering_mux_sel && !squash_Dhl) || stall_Dhl;
+  assign stall_Fhl = (!steering_mux_sel && !squash_Dhl && !brj_taken_Dhl) || stall_Dhl;
 
   // Next bubble bit
 
@@ -172,13 +172,13 @@ module parc_CoreCtrl
   // Queue for instruction memory response
   //----------------------------------------------------------------------
 
-  wire imemresp0_queue_en_Fhl = ( (stall_Dhl || !steering_mux_sel) && imemresp0_val );
+  wire imemresp0_queue_en_Fhl = ( (stall_Dhl || !steering_mux_sel) && imemresp0_val && !squash_Fhl);
   wire imemresp0_queue_val_next_Fhl
-    = (stall_Dhl || !steering_mux_sel) && ( imemresp0_val || imemresp0_queue_val_Fhl );
+    = (stall_Dhl || !steering_mux_sel) && ( imemresp0_val || imemresp0_queue_val_Fhl )  && !squash_Fhl;
 
-  wire imemresp1_queue_en_Fhl = ( (stall_Dhl || !steering_mux_sel) && imemresp1_val );
+  wire imemresp1_queue_en_Fhl = ( (stall_Dhl || !steering_mux_sel) && imemresp1_val  && !squash_Fhl);
   wire imemresp1_queue_val_next_Fhl
-    = (stall_Dhl || !steering_mux_sel) && ( imemresp1_val || imemresp1_queue_val_Fhl );
+    = (stall_Dhl || !steering_mux_sel) && ( imemresp1_val || imemresp1_queue_val_Fhl )  && !squash_Fhl;
 
   reg [31:0] imemresp0_queue_reg_Fhl;
   reg        imemresp0_queue_val_Fhl;
@@ -226,6 +226,9 @@ module parc_CoreCtrl
 
   always @ ( posedge clk ) begin
     if ( reset ) begin
+      bubble_Dhl <= 1'b1;
+    end
+    else if(!stall_Dhl && brj_taken_Dhl && !steering_mux_sel) begin
       bubble_Dhl <= 1'b1;
     end
     else if( !stall_Dhl && steering_mux_sel ) begin
@@ -632,8 +635,8 @@ module parc_CoreCtrl
   //wire [4:0] rs0_addr_Dhl  = inst0_rs_Dhl;
   //wire [4:0] rt0_addr_Dhl  = inst0_rt_Dhl;
 
-  wire [4:0] rs0_addr_Dhl  = (steering_mux_sel == 1'b0) ? inst0_rs_Dhl : inst1_rs_Dhl;
-  wire [4:0] rt0_addr_Dhl  = (steering_mux_sel == 1'b0) ? inst0_rt_Dhl : inst1_rt_Dhl;
+  wire [4:0] rs0_addr_Dhl  = steering_mux_sel ? inst1_rs_Dhl : inst0_rs_Dhl;
+  wire [4:0] rt0_addr_Dhl  = steering_mux_sel ? inst1_rt_Dhl : inst0_rt_Dhl;
 
   wire [4:0] rs1_addr_Dhl  = inst1_rs_Dhl;
   wire [4:0] rt1_addr_Dhl  = inst1_rt_Dhl;
@@ -864,7 +867,7 @@ module parc_CoreCtrl
   // Coprocessor register specifier
 
   //wire [4:0] cp0_addr_Dhl = inst0_rd_Dhl;
-  wire [4:0] cp0_addr_Dhl = (steering_mux_sel == 1'b0) ? inst0_rd_Dhl : inst1_rd_Dhl;
+  wire [4:0] cp0_addr_Dhl = steering_mux_sel ? inst1_rd_Dhl : inst0_rd_Dhl;
 
   //----------------------------------------------------------------------
   // Squash and Stall Logic
