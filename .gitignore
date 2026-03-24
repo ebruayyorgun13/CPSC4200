@@ -35,3 +35,6 @@ maven/
 *.swo
 .vscode/
 .idea/
+
+
+*.txt
