@@ -5,7 +5,7 @@
 `ifndef PARC_CORE_DPATH_V
 `define PARC_CORE_DPATH_V
 
-`include "imuldiv-IntMulDivIterative.v"
+`include "pv2long-CoreDpathPipeMulDiv.v"
 `include "pv2long-InstMsg.v"
 `include "pv2long-CoreDpathAlu.v"
 `include "pv2long-CoreDpathRegfile.v"
@@ -37,8 +37,8 @@ module parc_CoreDpath
   output        muldivreq_rdy,
   output        muldivresp_val,
   input         muldivresp_rdy,
-  input         muldiv_mux_sel_Xhl,
-  input         execute_mux_sel_Xhl,
+  input         muldiv_mux_sel_X3hl,
+  input         execute_mux_sel_X3hl,
   input   [2:0] dmemresp_mux_sel_Mhl,
   input         dmemresp_queue_en_Mhl,
   input         dmemresp_queue_val_Mhl,
@@ -51,12 +51,19 @@ module parc_CoreDpath
   input         stall_Mhl,
   input         stall_Whl,
 
+  input stall_X2hl,
+  input stall_X3hl,
+
   // Control Signals (dpath->ctrl)
 
   output        branch_cond_eq_Xhl,
   output        branch_cond_zero_Xhl,
   output        branch_cond_neg_Xhl,
-  output [31:0] proc2cop_data_Whl
+  output [31:0] proc2cop_data_Whl,
+
+  // bypass
+  input  [2:0] rs_byp_sel_Dhl,
+  input  [2:0] rt_byp_sel_Dhl
 );
 
   //--------------------------------------------------------------------
@@ -161,11 +168,37 @@ module parc_CoreDpath
   wire [ 4:0] rf_raddr1_Dhl = inst_rt_Dhl;
   wire [31:0] rf_rdata1_Dhl;
 
+  // Bypass source wires
+  wire [31:0] byp_X = execute_mux_out_Xhl;
+  wire [31:0] byp_M = wb_mux_out_Mhl;
+  wire [31:0] byp_W = wb_mux_out_Whl;
+  wire [31:0] byp_X2 = wb_mux_out_X2hl;
+  wire [31:0] byp_X3 = wb_mux_out_X3hl;
+
+  // rs bypass mux
+  wire [31:0] rs_byp_mux_out_Dhl
+    = ( rs_byp_sel_Dhl == 3'd0 ) ? rf_rdata0_Dhl
+    : ( rs_byp_sel_Dhl == 3'd1 ) ? byp_X
+    : ( rs_byp_sel_Dhl == 3'd2 ) ? byp_M
+    : ( rs_byp_sel_Dhl == 3'd3 ) ? byp_X2
+    : ( rs_byp_sel_Dhl == 3'd4 ) ? byp_X3
+    : ( rs_byp_sel_Dhl == 3'd5 ) ? byp_W
+    :                              32'bx;
+  // rt bypass mux
+  wire [31:0] rt_byp_mux_out_Dhl
+    = ( rt_byp_sel_Dhl == 3'd0 ) ? rf_rdata1_Dhl
+    : ( rt_byp_sel_Dhl == 3'd1 ) ? byp_X
+    : ( rt_byp_sel_Dhl == 3'd2 ) ? byp_M
+    : ( rt_byp_sel_Dhl == 3'd3 ) ? byp_X2
+    : ( rt_byp_sel_Dhl == 3'd4 ) ? byp_X3
+    : ( rt_byp_sel_Dhl == 3'd5 ) ? byp_W
+    :                              32'bx;
+
   // Jump reg address
 
   wire [31:0] jumpreg_targ_Dhl;
 
-  assign jumpreg_targ_Dhl  = rf_rdata0_Dhl;
+  assign jumpreg_targ_Dhl  = rs_byp_mux_out_Dhl;
 
   // Zero and sign extension immediate
 
@@ -182,18 +215,16 @@ module parc_CoreDpath
   wire [31:0] const16   = 32'd16;
 
   // Operand 0 mux
-
   wire [31:0] op0_mux_out_Dhl
-    = ( op0_mux_sel_Dhl == 2'd0 ) ? rf_rdata0_Dhl
+    = ( op0_mux_sel_Dhl == 2'd0 ) ? rs_byp_mux_out_Dhl
     : ( op0_mux_sel_Dhl == 2'd1 ) ? shamt_Dhl
     : ( op0_mux_sel_Dhl == 2'd2 ) ? const16
     : ( op0_mux_sel_Dhl == 2'd3 ) ? const0
     :                               32'bx;
 
   // Operand 1 mux
-
   wire [31:0] op1_mux_out_Dhl
-    = ( op1_mux_sel_Dhl == 3'd0 ) ? rf_rdata1_Dhl
+    = ( op1_mux_sel_Dhl == 3'd0 ) ? rt_byp_mux_out_Dhl
     : ( op1_mux_sel_Dhl == 3'd1 ) ? imm_zext_Dhl
     : ( op1_mux_sel_Dhl == 3'd2 ) ? imm_sext_Dhl
     : ( op1_mux_sel_Dhl == 3'd3 ) ? pc_plus4_Dhl
@@ -202,7 +233,7 @@ module parc_CoreDpath
 
   // wdata with bypassing
 
-  wire [31:0] wdata_Dhl = rf_rdata1_Dhl;
+  wire [31:0] wdata_Dhl = rt_byp_mux_out_Dhl;
 
   //----------------------------------------------------------------------
   // X <- D
@@ -249,17 +280,19 @@ module parc_CoreDpath
 
   // Muldiv Result Mux
 
-  wire [31:0] muldiv_mux_out_Xhl
-    = ( muldiv_mux_sel_Xhl == 1'd0 ) ? muldivresp_msg_result_Xhl[31:0]
-    : ( muldiv_mux_sel_Xhl == 1'd1 ) ? muldivresp_msg_result_Xhl[63:32]
+  wire [31:0] muldiv_mux_out_X3hl
+    = ( muldiv_mux_sel_X3hl == 1'd0 ) ? muldivresp_msg_result_Xhl[31:0]
+    : ( muldiv_mux_sel_X3hl == 1'd1 ) ? muldivresp_msg_result_Xhl[63:32]
     :                                  32'bx;
 
   // Execute Result Mux
 
-  wire [31:0] execute_mux_out_Xhl
+  /* wire [31:0] execute_mux_out_Xhl
     = ( execute_mux_sel_Xhl == 1'd0 ) ? alu_out_Xhl
     : ( execute_mux_sel_Xhl == 1'd1 ) ? muldiv_mux_out_Xhl
-    :                                   32'bx;
+    :                                   32'bx; */
+
+  wire [31:0] execute_mux_out_Xhl = alu_out_Xhl;
 
   //----------------------------------------------------------------------
   // M <- X
@@ -334,16 +367,49 @@ module parc_CoreDpath
     :                              32'bx;
 
   //----------------------------------------------------------------------
-  // W <- M
+  // X2 <- M
   //----------------------------------------------------------------------
 
-  reg  [31:0] pc_Whl;
-  reg  [31:0] wb_mux_out_Whl;
+  reg [31:0] pc_X2hl;
+  reg [31:0] wb_mux_out_X2hl;
 
-  always @ (posedge clk) begin
-    if( !stall_Whl ) begin
-      pc_Whl                 <= pc_Mhl;
-      wb_mux_out_Whl         <= wb_mux_out_Mhl;
+  always @(posedge clk) begin
+    if ( !stall_X2hl ) begin
+      pc_X2hl         <= pc_Mhl;
+      wb_mux_out_X2hl <= wb_mux_out_Mhl;
+    end
+  end
+
+  //----------------------------------------------------------------------
+  // X3 <- X2
+  //----------------------------------------------------------------------
+
+  reg [31:0] pc_X3hl;
+  reg [31:0] execute_mux_out_X3hl;
+
+  always @(posedge clk) begin
+    if ( !stall_X3hl ) begin   // still using stall_Mhl for now
+      pc_X3hl         <= pc_X2hl;
+      execute_mux_out_X3hl <= wb_mux_out_X2hl;
+    end
+  end
+
+  wire [31:0] wb_mux_out_X3hl = (execute_mux_sel_X3hl == 1'd0) ? execute_mux_out_X3hl
+                              : (execute_mux_sel_X3hl == 1'd1) ? muldiv_mux_out_X3hl : 32'bx;
+
+
+
+  //----------------------------------------------------------------------
+  // W <- X3
+  //----------------------------------------------------------------------
+
+  reg [31:0] pc_Whl;
+  reg [31:0] wb_mux_out_Whl;
+
+  always @(posedge clk) begin
+    if ( !stall_Whl ) begin
+      pc_Whl         <= pc_X3hl;
+      wb_mux_out_Whl <= wb_mux_out_X3hl;
     end
   end
 
@@ -364,12 +430,12 @@ module parc_CoreDpath
   always @ ( posedge clk ) begin
     pc_debug <= pc_Whl;
   end
-  
+
   //----------------------------------------------------------------------
   // Submodules
   //----------------------------------------------------------------------
-  
-  // Address Generation
+
+  // Address Generation 
 
   parc_InstMsgFromBits inst_msg_from_bits
   (
@@ -409,22 +475,22 @@ module parc_CoreDpath
     .out  (alu_out_Xhl)
   );
 
-  // Multiplier/Divider
+  // 4-phase Multiplier/Divider
 
-  imuldiv_IntMulDivIterative imuldiv
+  parc_CoreDpathPipeMulDiv imuldiv
   (
     .clk                   (clk),
     .reset                 (reset),
+
     .muldivreq_msg_fn      (muldivreq_msg_fn_Xhl),
     .muldivreq_msg_a       (op0_mux_out_Xhl),
     .muldivreq_msg_b       (op1_mux_out_Xhl),
     .muldivreq_val         (muldivreq_val),
     .muldivreq_rdy         (muldivreq_rdy),
-    //Note that this probably will come out in a different pipeline stage than X
+
     .muldivresp_msg_result (muldivresp_msg_result_Xhl),
     .muldivresp_val        (muldivresp_val),
     .muldivresp_rdy        (muldivresp_rdy)
-    //Note these stall signals should be hooked to something!!!
   );
 
 endmodule

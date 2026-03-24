@@ -61,8 +61,8 @@ module parc_Core
   wire        muldivreq_rdy;
   wire        muldivresp_val;
   wire        muldivresp_rdy;
-  wire        muldiv_mux_sel_Xhl;
-  wire        execute_mux_sel_Xhl;
+  wire        muldiv_mux_sel_X3hl;
+  wire        execute_mux_sel_X3hl;
   wire  [2:0] dmemresp_mux_sel_Mhl;
   wire        dmemresp_queue_en_Mhl;
   wire        dmemresp_queue_val_Mhl;
@@ -75,10 +75,16 @@ module parc_Core
   wire        stall_Mhl;
   wire        stall_Whl;
 
+  wire stall_X2hl;
+  wire stall_X3hl;
+
   wire        branch_cond_eq_Xhl;
   wire        branch_cond_zero_Xhl;
   wire        branch_cond_neg_Xhl;
   wire [31:0] proc2cop_data_Whl;
+  
+  wire [2:0] rs_byp_sel_Dhl;
+  wire [2:0] rt_byp_sel_Dhl;
 
   //----------------------------------------------------------------------
   // Pack Memory Request Messages
@@ -158,8 +164,8 @@ module parc_Core
     .muldivreq_rdy          (muldivreq_rdy),
     .muldivresp_val         (muldivresp_val),
     .muldivresp_rdy         (muldivresp_rdy),
-    .muldiv_mux_sel_Xhl     (muldiv_mux_sel_Xhl),
-    .execute_mux_sel_Xhl    (execute_mux_sel_Xhl),
+    .muldiv_mux_sel_X3hl     (muldiv_mux_sel_X3hl),
+    .execute_mux_sel_X3hl    (execute_mux_sel_X3hl),
     .dmemresp_mux_sel_Mhl   (dmemresp_mux_sel_Mhl),
     .dmemresp_queue_en_Mhl  (dmemresp_queue_en_Mhl),
     .dmemresp_queue_val_Mhl (dmemresp_queue_val_Mhl),
@@ -171,6 +177,8 @@ module parc_Core
     .stall_Xhl              (stall_Xhl),
     .stall_Mhl              (stall_Mhl),
     .stall_Whl              (stall_Whl),
+    .stall_X2hl ( stall_X2hl ),
+    .stall_X3hl ( stall_X3hl ),
 
     // Control Signals (dpath->ctrl)
 
@@ -181,7 +189,11 @@ module parc_Core
 
     // CP0 Status
 
-    .cp0_status             (cp0_status)
+    .cp0_status             (cp0_status),
+
+    // Bypass
+    .rs_byp_sel_Dhl (rs_byp_sel_Dhl),
+    .rt_byp_sel_Dhl (rt_byp_sel_Dhl)
   );
 
   //----------------------------------------------------------------------
@@ -215,8 +227,8 @@ module parc_Core
     .muldivreq_rdy           (muldivreq_rdy),
     .muldivresp_val          (muldivresp_val),
     .muldivresp_rdy          (muldivresp_rdy),
-    .muldiv_mux_sel_Xhl      (muldiv_mux_sel_Xhl),
-    .execute_mux_sel_Xhl     (execute_mux_sel_Xhl),
+    .muldiv_mux_sel_X3hl      (muldiv_mux_sel_X3hl),
+    .execute_mux_sel_X3hl     (execute_mux_sel_X3hl),
     .dmemresp_mux_sel_Mhl    (dmemresp_mux_sel_Mhl),
     .dmemresp_queue_en_Mhl   (dmemresp_queue_en_Mhl),
     .dmemresp_queue_val_Mhl  (dmemresp_queue_val_Mhl),
@@ -228,13 +240,19 @@ module parc_Core
     .stall_Xhl               (stall_Xhl),
     .stall_Mhl               (stall_Mhl),
     .stall_Whl               (stall_Whl),
+    .stall_X2hl ( stall_X2hl ),
+    .stall_X3hl ( stall_X3hl ),
 
     // Control Signals (dpath->ctrl)
 
     .branch_cond_eq_Xhl      (branch_cond_eq_Xhl),
     .branch_cond_zero_Xhl    (branch_cond_zero_Xhl),
     .branch_cond_neg_Xhl     (branch_cond_neg_Xhl),
-    .proc2cop_data_Whl       (proc2cop_data_Whl)
+    .proc2cop_data_Whl       (proc2cop_data_Whl),
+
+    // Bypass
+    .rs_byp_sel_Dhl (rs_byp_sel_Dhl),
+    .rt_byp_sel_Dhl (rt_byp_sel_Dhl)
   );
 
 endmodule

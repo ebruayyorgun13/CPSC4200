@@ -3,7 +3,7 @@
 //========================================================================
 
 `include "imuldiv-MulDivReqMsg.v"
-`include "pv2long-CoreDpathPipeMulDiv.v"
+`include "pv2byp-CoreDpathPipeMulDiv.v"
 `include "vc-TestRandDelaySource.v"
 `include "vc-TestRandDelaySink.v"
 `include "vc-Test.v"
@@ -31,11 +31,6 @@ module parc_CoreDpathPipeMulDiv_helper
   wire        sink_val;
   wire        sink_rdy;
   wire        sink_done;
-  
-  wire        sink_Xhl = sink_val && !sink_rdy;
-  wire        sink_Mhl = sink_Xhl;
-  wire        sink_X2hl = 1'b0;
-  wire        sink_X3hl = 1'b0;
 
   assign done = src_done && sink_done;
 
@@ -68,12 +63,7 @@ module parc_CoreDpathPipeMulDiv_helper
     .muldivreq_rdy         (src_rdy),
     .muldivresp_msg_result (sink_msg),
     .muldivresp_val        (sink_val),
-    .muldivresp_rdy        (sink_rdy),
-    .stall_Xhl             (sink_Xhl),
-    .stall_Mhl             (sink_Mhl),
-    .stall_X2hl            (sink_X2hl),
-    .stall_X3hl            (sink_X3hl)
-
+    .muldivresp_rdy        (sink_rdy)
   );
 
   vc_TestRandDelaySink#(64,1024,3) sink
