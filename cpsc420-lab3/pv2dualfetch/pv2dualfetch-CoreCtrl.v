@@ -130,7 +130,7 @@ module parc_CoreCtrl
 
       bubble_Fhl <= 1'b0;
     end
-    else if( !stall_Fhl) begin 
+    else if( !stall_Fhl ) begin 
       imemreq_val_Fhl <= imemreq_val_Phl;
 
       bubble_Fhl <= bubble_next_Phl;
@@ -589,7 +589,7 @@ module parc_CoreCtrl
     if (reset) begin
       steering_mux_sel <= 1'b1;
     end
-    else if (!stall_Dhl) begin
+    else if (!stall_Dhl || ((!steering_mux_sel && ir1_brj_taken_Dhl))) begin
       steering_mux_sel <= ~steering_mux_sel;
     end
   end
@@ -612,6 +612,10 @@ module parc_CoreCtrl
   // Jump and Branch Controls
 
   wire       brj_taken_Dhl = ( inst_val_Dhl && curr_cs[`PARC_INST_MSG_J_EN] );
+  wire ir1_is_jalr = imemresp1_queue_mux_out_Fhl ==  `PARC_INST_MSG_JALR;
+  wire [cs_sz-1:0] potent_ir1_jalr = ir1_is_jalr ? { y,  y,    br_none, pm_r,   am_0,    y, bm_pc,   n, alu_add,  md_x,    n, mdm_x, em_alu, nr,  ml_x, dmm_x,  wm_alu, y,  rd0, n   } : 38'b0; 
+  //wire ir1_brj_taken_Dhl = ( inst_val_Dhl && potent_ir1_jalr[`PARC_INST_MSG_J_EN]);
+  //wire ir1_brj_taken_Dhl = ( inst_val_Dhl && cs1[`PARC_INST_MSG_J_EN]);
   wire [2:0] br_sel_Dhl    = curr_cs[`PARC_INST_MSG_BR_SEL];
 
   // PC Mux Select
@@ -966,10 +970,13 @@ module parc_CoreCtrl
 
   // Aggregate Stall Signal
 
-  assign stall_Dhl = (stall_X0hl || stall_0_muldiv_use_Dhl || stall_0_load_use_Dhl);
+  wire ir1_brj_taken_Dhl = (ir1_Dhl ==? `PARC_INST_MSG_JALR) && inst_val_Dhl;
+
+  assign stall_Dhl = ( stall_X0hl || stall_0_muldiv_use_Dhl
+                    || stall_0_load_use_Dhl || (!steering_mux_sel && ir1_brj_taken_Dhl) );
   // Next bubble bit
 
-  wire bubble_sel_Dhl  = ( squash_Dhl || stall_Dhl );
+  wire bubble_sel_Dhl  = ( squash_Dhl || (stall_Dhl && !(!steering_mux_sel && ir1_brj_taken_Dhl)));
   wire bubble_next_Dhl = ( !bubble_sel_Dhl ) ? bubble_Dhl
                        : ( bubble_sel_Dhl )  ? 1'b1
                        :                       1'bx;
