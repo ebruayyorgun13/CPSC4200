@@ -149,7 +149,7 @@ module parc_CoreDpath
   reg [31:0] pc_plus8_Dhl;
 
   always @ (posedge clk) begin
-    if( !stall_Dhl ) begin
+    if( !stall_Dhl && pc_offset_mux_sel_Dhl ) begin
       pc_Dhl       <= pc_Fhl;
       pc_plus4_Dhl <= pc_plus4_Fhl;
       pc_plus8_Dhl <= pc_plus8_Fhl;

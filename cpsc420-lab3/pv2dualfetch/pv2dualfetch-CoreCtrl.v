@@ -228,6 +228,9 @@ module parc_CoreCtrl
     if ( reset ) begin
       bubble_Dhl <= 1'b1;
     end
+    else if (!stall_Dhl && squash_Dhl) begin
+      bubble_Dhl <= 1'b1;
+    end
     else if(!stall_Dhl && brj_taken_Dhl && !steering_mux_sel) begin
       bubble_Dhl <= 1'b1;
     end
