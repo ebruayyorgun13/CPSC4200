@@ -187,11 +187,23 @@ module parc_CoreCtrl
   reg        imemresp1_queue_val_Fhl;
 
   always @ ( posedge clk ) begin
-    if ( imemresp0_queue_en_Fhl ) begin
-      imemresp0_queue_reg_Fhl <= imemresp0_msg_data;
+    // if ( imemresp0_queue_en_Fhl ) begin
+    //   imemresp0_queue_reg_Fhl <= imemresp0_msg_data;
+    if ( reset ) begin
+      imemresp0_queue_val_Fhl <= 1'b0;
+      imemresp1_queue_val_Fhl <= 1'b0;
     end
-    if ( imemresp1_queue_en_Fhl ) begin
-      imemresp1_queue_reg_Fhl <= imemresp1_msg_data;
+    // if ( imemresp1_queue_en_Fhl ) begin
+    //   imemresp1_queue_reg_Fhl <= imemresp1_msg_data;
+    else begin
+      if ( imemresp0_queue_en_Fhl ) begin
+        imemresp0_queue_reg_Fhl <= imemresp0_msg_data;
+      end
+      if ( imemresp1_queue_en_Fhl ) begin
+        imemresp1_queue_reg_Fhl <= imemresp1_msg_data;
+      end
+      imemresp0_queue_val_Fhl <= imemresp0_queue_val_next_Fhl;
+      imemresp1_queue_val_Fhl <= imemresp1_queue_val_next_Fhl;
     end
     imemresp0_queue_val_Fhl <= imemresp0_queue_val_next_Fhl;
     imemresp1_queue_val_Fhl <= imemresp1_queue_val_next_Fhl;
@@ -701,7 +713,7 @@ module parc_CoreCtrl
     wire [4:0]  rfB_waddr_X2hl = rf1_waddr_X2hl;
     wire        rfB_wen_X3hl   = rf1_wen_X3hl;
     wire [4:0]  rfB_waddr_X3hl = rf1_waddr_X3hl;
-    wire        rfAB_wen_Whl    = rf1_wen_Whl;
+    wire        rfB_wen_Whl    = rf1_wen_Whl;
     assign rfB_waddr_Whl  = rf1_waddr_Whl;
 
   // Operand Bypassing Logic
