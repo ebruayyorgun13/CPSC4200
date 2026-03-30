@@ -632,7 +632,7 @@ module parc_CoreCtrl
     end
     else if (!stall_Dhl || ((!steering_mux_sel && ir1_brj_taken_Dhl))) begin
       if (steering_mux_sel == 1'b1) begin
-        if (ir1_alu_only && !has_hazard)
+        if ((ir1_alu_only) && !has_hazard)
           steering_mux_sel <= 1'b1; 
         else
           steering_mux_sel <= 1'b0; 
@@ -655,12 +655,12 @@ module parc_CoreCtrl
     pipeB_cs = nop_cs;
     if (both_not_alu || has_hazard) begin
       if ( steering_mux_sel == 1'b1 ) begin
-        instA_Dhl = ir0_Dhl;
-        pipeA_cs   = cs0;
-      end
-      else if ( steering_mux_sel == 1'b0 ) begin
         instA_Dhl = ir1_Dhl;
         pipeA_cs   = cs1;
+      end
+      else if ( steering_mux_sel == 1'b0 ) begin
+        instA_Dhl = ir0_Dhl;
+        pipeA_cs   = cs0;
       end
     end
     else begin
@@ -721,7 +721,7 @@ module parc_CoreCtrl
   //wire [4:0] rs0_addr_Dhl  = inst0_rs_Dhl;
   //wire [4:0] rt0_addr_Dhl  = inst0_rt_Dhl;
 
-  wire pipeA_gets_ir1 = ((both_not_alu || has_hazard) && !steering_mux_sel) || (!(both_not_alu || has_hazard) && ir0_alu_only && !ir1_alu_only);
+  wire pipeA_gets_ir1 = ((both_not_alu || has_hazard) && steering_mux_sel) || (!(both_not_alu || has_hazard) && ir0_alu_only && !ir1_alu_only);
   wire pipeB_gets_ir0 = (!(both_not_alu || has_hazard) && ir0_alu_only && !ir1_alu_only);
 
   wire [4:0] rs0_addr_Dhl  = pipeA_gets_ir1 ? inst1_rs_Dhl : inst0_rs_Dhl;
