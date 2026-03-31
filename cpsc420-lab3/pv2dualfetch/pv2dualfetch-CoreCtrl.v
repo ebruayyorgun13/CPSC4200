@@ -157,8 +157,12 @@ module parc_CoreCtrl
 
   // Stall in F if D is stalled
 
-  // Fetch stalls when it is in the middle of steering the second instruction
-  assign stall_Fhl = (!steering_mux_sel && !squash_Dhl && !brj_taken_Dhl) || stall_Dhl;
+  // Fetch stalls when it is in the middle of steering the second instruction.
+  // The narrow D-stage PC-context hold should not suppress an active redirect.
+  wire stall_Fhl_pcctx_suppress = stall_pcctx_Dhl && !brj_taken_Dhl;
+  assign stall_Fhl = (!steering_mux_sel && !squash_Dhl && !brj_taken_Dhl)
+                  || ostall_Dhl
+                  || stall_Fhl_pcctx_suppress;
 
   // Next bubble bit
 
