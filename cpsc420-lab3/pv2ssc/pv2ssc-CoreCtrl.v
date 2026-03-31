@@ -226,6 +226,12 @@ module parc_CoreCtrl
     : ( imemresp1_queue_val_Fhl )  ? imemresp1_queue_reg_Fhl
     :                               32'bx;
 
+  // Only hand a new pair to decode when both instructions are available,
+  // either directly from imem or from the response queue.
+  wire imem_pair_val_Fhl
+    = ( imemresp0_val || imemresp0_queue_val_Fhl )
+   && ( imemresp1_val || imemresp1_queue_val_Fhl );
+
   //----------------------------------------------------------------------
   // D <- F
   //----------------------------------------------------------------------
@@ -248,10 +254,13 @@ module parc_CoreCtrl
     else if (!ostall_Dhl && squash_Dhl) begin
       bubble_Dhl <= 1'b1;
     end
-    else if(!ostall_Dhl && brj_taken_Dhl && !ready_for_next) begin
+    // Any D-stage redirect consumes the current decode contents immediately.
+    // If the redirected fetch pair is not back yet (randdelay), keep D bubbled
+    // instead of re-issuing the same jump/jalr a second time.
+    else if(!ostall_Dhl && brj_taken_Dhl) begin
       bubble_Dhl <= 1'b1;
     end
-    else if( !ostall_Dhl && ready_for_next ) begin
+    else if( !ostall_Dhl && ready_for_next && imem_pair_val_Fhl ) begin
       ir0_Dhl    <= imemresp0_queue_mux_out_Fhl;
       ir1_Dhl    <= imemresp1_queue_mux_out_Fhl;
       bubble_Dhl <= bubble_next_Fhl;
@@ -639,7 +648,7 @@ module parc_CoreCtrl
     if (reset) begin
       steering_mux_sel <= 1'b1;
     end
-    else if (!stall_Dhl || ((!steering_mux_sel && ir1_brj_taken_Dhl))) begin
+    else if (!ostall_Dhl || ((!steering_mux_sel && ir1_brj_taken_Dhl))) begin
       if (steering_mux_sel == 1'b1 && inst_val_Dhl) begin
         if (!need_stall)
           steering_mux_sel <= 1'b1; 
@@ -1125,14 +1134,30 @@ module parc_CoreCtrl
                      || stall_1_load_use_Dhl
                      || stall_0_load_use_Dhl );
 
+  // Track whether the instruction that just entered X0 came from slot 1
+  reg slot1_ctrl_in_flight;
+  always @(posedge clk) begin
+    if (reset || squash_Dhl)
+      slot1_ctrl_in_flight <= 1'b0;
+    else if (!ostall_Dhl)
+      slot1_ctrl_in_flight <= (steering_mux_sel && !ready_for_next && !bubble_Dhl && cs1_is_ctrl_Dhl);
+  end
+
   // PC-context hold: when issuing slot 0 and slot 1 is control-flow,
   // hold D so slot 1 can compute its branch/jump target with the right PC base.
   wire [2:0] br_sel1_Dhl     = cs1[`PARC_INST_MSG_BR_SEL];
   wire       cs1_is_ctrl_Dhl = cs1[`PARC_INST_MSG_J_EN] || ( br_sel1_Dhl != br_none );
-  wire       stall_pcctx_Dhl = !steering_mux_sel
-                            && !bubble_Dhl
-                            && !squash_Dhl
-                            && cs1_is_ctrl_Dhl;
+  // wire       stall_pcctx_Dhl = !steering_mux_sel
+  //                           && !bubble_Dhl
+  //                           && !squash_Dhl
+  //                           && cs1_is_ctrl_Dhl;
+  wire stall_pcctx_Dhl = ( steering_mux_sel && !ready_for_next && !bubble_Dhl && !squash_Dhl
+                      && cs1_is_ctrl_Dhl )
+                    || ( slot1_ctrl_in_flight
+                      && inst_val_X0hl
+                      && (br_sel_X0hl != br_none)
+                      && !brj_taken_X0hl
+                      && !squash_Dhl );
 
   assign stall_Dhl = ostall_Dhl || stall_pcctx_Dhl;
   // Next bubble bit
