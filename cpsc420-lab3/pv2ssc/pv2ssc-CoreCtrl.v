@@ -159,7 +159,7 @@ module parc_CoreCtrl
 
   //assign stall_Fhl = stall_Dhl;
   // Fetch stalls when it is in the middle of steering the second instruction
-  assign stall_Fhl = (!steering_mux_sel && !squash_Dhl && !brj_taken_Dhl) || stall_Dhl;
+  assign stall_Fhl = (!ready_for_next && !squash_Dhl && !brj_taken_Dhl) || stall_Dhl;
 
   // Next bubble bit
 
@@ -172,13 +172,13 @@ module parc_CoreCtrl
   // Queue for instruction memory response
   //----------------------------------------------------------------------
 
-  wire imemresp0_queue_en_Fhl = ( (stall_Dhl || !steering_mux_sel) && imemresp0_val && !squash_Fhl);
+  wire imemresp0_queue_en_Fhl = ( (stall_Dhl || !ready_for_next) && imemresp0_val && !squash_Fhl);
   wire imemresp0_queue_val_next_Fhl
-    = (stall_Dhl || !steering_mux_sel) && ( imemresp0_val || imemresp0_queue_val_Fhl )  && !squash_Fhl;
+    = (stall_Dhl || !ready_for_next) && ( imemresp0_val || imemresp0_queue_val_Fhl )  && !squash_Fhl;
 
-  wire imemresp1_queue_en_Fhl = ( (stall_Dhl || !steering_mux_sel) && imemresp1_val  && !squash_Fhl);
+  wire imemresp1_queue_en_Fhl = ( (stall_Dhl || !ready_for_next) && imemresp1_val  && !squash_Fhl);
   wire imemresp1_queue_val_next_Fhl
-    = (stall_Dhl || !steering_mux_sel) && ( imemresp1_val || imemresp1_queue_val_Fhl )  && !squash_Fhl;
+    = (stall_Dhl || !ready_for_next) && ( imemresp1_val || imemresp1_queue_val_Fhl )  && !squash_Fhl;
 
   reg [31:0] imemresp0_queue_reg_Fhl;
   reg        imemresp0_queue_val_Fhl;
@@ -230,6 +230,7 @@ module parc_CoreCtrl
   reg [31:0] ir0_Dhl;
   reg [31:0] ir1_Dhl;
   reg        bubble_Dhl;
+  
 
   wire stall_0_Dhl = 1'b0;
   wire stall_1_Dhl = 1'b0; 
@@ -243,10 +244,10 @@ module parc_CoreCtrl
     else if (!stall_Dhl && squash_Dhl) begin
       bubble_Dhl <= 1'b1;
     end
-    else if(!stall_Dhl && brj_taken_Dhl && !steering_mux_sel) begin
+    else if(!stall_Dhl && brj_taken_Dhl && !ready_for_next) begin
       bubble_Dhl <= 1'b1;
     end
-    else if( !stall_Dhl && steering_mux_sel ) begin
+    else if( !stall_Dhl && ready_for_next ) begin
       ir0_Dhl    <= imemresp0_queue_mux_out_Fhl;
       ir1_Dhl    <= imemresp1_queue_mux_out_Fhl;
       bubble_Dhl <= bubble_next_Fhl;
@@ -612,15 +613,19 @@ module parc_CoreCtrl
 
   wire both_not_alu = !ir0_alu_only && !ir1_alu_only;
 
-  wire waw_hazard = (cs0[`PARC_INST_MSG_RF_WEN] && cs1[`PARC_INST_MSG_RF_WEN]) &&
+  wire waw_hazard = inst_val_Dhl && (cs0[`PARC_INST_MSG_RF_WEN] && cs1[`PARC_INST_MSG_RF_WEN]) &&
                     (cs0[`PARC_INST_MSG_RF_WADDR] == cs1[`PARC_INST_MSG_RF_WADDR]) &&
                     (cs0[`PARC_INST_MSG_RF_WADDR] != 5'd0);
 
-  wire raw_hazard = (cs0[`PARC_INST_MSG_RF_WEN] && (cs0[`PARC_INST_MSG_RF_WADDR] != 5'd0)) &&
+  wire raw_hazard = inst_val_Dhl && (cs0[`PARC_INST_MSG_RF_WEN] && (cs0[`PARC_INST_MSG_RF_WADDR] != 5'd0)) &&
                     ( (cs1[`PARC_INST_MSG_RS_EN] && (inst1_rs_Dhl == cs0[`PARC_INST_MSG_RF_WADDR])) ||
                       (cs1[`PARC_INST_MSG_RT_EN] && (inst1_rt_Dhl == cs0[`PARC_INST_MSG_RF_WADDR])) );
 
-  wire has_hazard = waw_hazard || raw_hazard;
+  wire has_hazard = (waw_hazard || raw_hazard);
+
+  wire need_stall = inst_val_Dhl && (both_not_alu || has_hazard);
+
+  wire ready_for_next = (steering_mux_sel && !need_stall) || !steering_mux_sel;
 
   reg steering_mux_sel;
 
@@ -631,8 +636,8 @@ module parc_CoreCtrl
       steering_mux_sel <= 1'b1;
     end
     else if (!stall_Dhl || ((!steering_mux_sel && ir1_brj_taken_Dhl))) begin
-      if (steering_mux_sel == 1'b1) begin
-        if ((ir1_alu_only) && !has_hazard)
+      if (steering_mux_sel == 1'b1 && inst_val_Dhl) begin
+        if (!need_stall)
           steering_mux_sel <= 1'b1; 
         else
           steering_mux_sel <= 1'b0; 
@@ -655,12 +660,12 @@ module parc_CoreCtrl
     pipeB_cs = nop_cs;
     if (both_not_alu || has_hazard) begin
       if ( steering_mux_sel == 1'b1 ) begin
-        instA_Dhl = ir1_Dhl;
-        pipeA_cs   = cs1;
-      end
-      else if ( steering_mux_sel == 1'b0 ) begin
         instA_Dhl = ir0_Dhl;
         pipeA_cs   = cs0;
+      end
+      else if ( steering_mux_sel == 1'b0 ) begin
+        instA_Dhl = ir1_Dhl;
+        pipeA_cs   = cs1;
       end
     end
     else begin
@@ -721,7 +726,7 @@ module parc_CoreCtrl
   //wire [4:0] rs0_addr_Dhl  = inst0_rs_Dhl;
   //wire [4:0] rt0_addr_Dhl  = inst0_rt_Dhl;
 
-  wire pipeA_gets_ir1 = ((both_not_alu || has_hazard) && steering_mux_sel) || (!(both_not_alu || has_hazard) && ir0_alu_only && !ir1_alu_only);
+  wire pipeA_gets_ir1 = ((both_not_alu || has_hazard) && ready_for_next) || (!(both_not_alu || has_hazard) && ir0_alu_only && !ir1_alu_only);
   wire pipeB_gets_ir0 = (!(both_not_alu || has_hazard) && ir0_alu_only && !ir1_alu_only);
 
   wire [4:0] rs0_addr_Dhl  = pipeA_gets_ir1 ? inst1_rs_Dhl : inst0_rs_Dhl;
@@ -1110,10 +1115,10 @@ module parc_CoreCtrl
   wire ir1_brj_taken_Dhl = (ir1_Dhl ==? `PARC_INST_MSG_JALR) && inst_val_Dhl;
 
   assign stall_Dhl = ( stall_X0hl || stall_0_muldiv_use_Dhl || stall_1_muldiv_use_Dhl || stall_1_load_use_Dhl
-                    || stall_0_load_use_Dhl || (!steering_mux_sel && ir1_brj_taken_Dhl) );
+                    || stall_0_load_use_Dhl || (!ready_for_next && ir1_brj_taken_Dhl) );
   // Next bubble bit
 
-  wire bubble_sel_Dhl  = ( squash_Dhl || (stall_Dhl && !(!steering_mux_sel && ir1_brj_taken_Dhl)));
+  wire bubble_sel_Dhl  = ( squash_Dhl || (stall_Dhl && !(!ready_for_next && ir1_brj_taken_Dhl)));
   wire bubble_next_Dhl = ( !bubble_sel_Dhl ) ? bubble_Dhl
                        : ( bubble_sel_Dhl )  ? 1'b1
                        :                       1'bx;
