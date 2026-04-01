@@ -1732,6 +1732,7 @@ module parc_CoreCtrl
   reg [31:0] num_inst    = 32'b0;
   reg [31:0] num_cycles  = 32'b0;
   reg        stats_en    = 1'b0; // Used for enabling stats on asm tests
+  wire       dual_issue_Dhl = inst_val_Dhl && steering_mux_sel && !need_stall;
 
   always @( posedge clk ) begin
     if ( !reset ) begin
@@ -1743,8 +1744,8 @@ module parc_CoreCtrl
 
         // Count instructions for every cycle not squashed or stalled
 
-        if ( inst_val_Dhl && !stall_Dhl ) begin
-          num_inst = num_inst + 1;
+        if ( inst_val_Dhl && !ostall_Dhl ) begin
+          num_inst = num_inst + ( dual_issue_Dhl ? 32'd2 : 32'd1 );
         end
 
       end
