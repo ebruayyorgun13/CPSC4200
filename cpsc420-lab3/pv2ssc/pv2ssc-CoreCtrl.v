@@ -157,8 +157,7 @@ module parc_CoreCtrl
 
   // Stall in F if D is stalled
 
-  // Fetch stalls for real hazards, for normal slot-1 steering,
-  // but NOT for the synthetic PC-context hold when D is actively redirecting.
+  // fetch stalls for real hazards, for normal slot-1 steering, but NOT for the synthetic PC-context hold when D is actively redirecting
   wire stall_Fhl_pcctx_suppress = stall_pcctx_Dhl && !brj_taken_Dhl;
   assign stall_Fhl = (!ready_for_next && !squash_Dhl && !brj_taken_Dhl)
                   || ostall_Dhl
@@ -190,14 +189,10 @@ module parc_CoreCtrl
   reg        imemresp1_queue_val_Fhl;
 
   always @ ( posedge clk ) begin
-    // if ( imemresp0_queue_en_Fhl ) begin
-    //   imemresp0_queue_reg_Fhl <= imemresp0_msg_data;
     if ( reset ) begin
       imemresp0_queue_val_Fhl <= 1'b0;
       imemresp1_queue_val_Fhl <= 1'b0;
     end
-    // if ( imemresp1_queue_en_Fhl ) begin
-    //   imemresp1_queue_reg_Fhl <= imemresp1_msg_data;
     else begin
       if ( imemresp0_queue_en_Fhl ) begin
         imemresp0_queue_reg_Fhl <= imemresp0_msg_data;
@@ -208,8 +203,6 @@ module parc_CoreCtrl
       imemresp0_queue_val_Fhl <= imemresp0_queue_val_next_Fhl;
       imemresp1_queue_val_Fhl <= imemresp1_queue_val_next_Fhl;
     end
-    imemresp0_queue_val_Fhl <= imemresp0_queue_val_next_Fhl;
-    imemresp1_queue_val_Fhl <= imemresp1_queue_val_next_Fhl;
   end
 
   //----------------------------------------------------------------------
@@ -226,8 +219,7 @@ module parc_CoreCtrl
     : ( imemresp1_queue_val_Fhl )  ? imemresp1_queue_reg_Fhl
     :                               32'bx;
 
-  // Only hand a new pair to decode when both instructions are available,
-  // either directly from imem or from the response queue.
+  // only hand a new pair to decode when both instructions are available, either directly from imem or from the response queue
   wire imem_pair_val_Fhl
     = ( imemresp0_val || imemresp0_queue_val_Fhl )
    && ( imemresp1_val || imemresp1_queue_val_Fhl );
@@ -254,11 +246,14 @@ module parc_CoreCtrl
     else if (!ostall_Dhl && squash_Dhl) begin
       bubble_Dhl <= 1'b1;
     end
-    // Any D-stage redirect consumes the current decode contents immediately.
-    // If the redirected fetch pair is not back yet (randdelay), keep D bubbled
-    // instead of re-issuing the same jump/jalr a second time.
+    // any D-stage redirect consumes the current decode contents immediately
+    // if the redirected fetch pair is not back yet (randdelay), keep D bubbled (instead of re-issuing the same jump/jalr a second time)
     else if(!ostall_Dhl && brj_taken_Dhl) begin
       bubble_Dhl <= 1'b1;
+    end
+    // when we keep the pair in decode to issue slot 1 next, consume slot 0
+    else if( !ostall_Dhl && steering_mux_sel && !ready_for_next && !bubble_Dhl ) begin
+      ir0_Dhl    <= `PARC_INST_MSG_NOP;
     end
     else if( !ostall_Dhl && ready_for_next && imem_pair_val_Fhl ) begin
       ir0_Dhl    <= imemresp0_queue_mux_out_Fhl;
