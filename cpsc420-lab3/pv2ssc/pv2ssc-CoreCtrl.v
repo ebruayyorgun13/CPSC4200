@@ -157,9 +157,11 @@ module parc_CoreCtrl
 
   // Stall in F if D is stalled
 
-  //assign stall_Fhl = stall_Dhl;
-  // Fetch stalls when it is in the middle of steering the second instruction
-  assign stall_Fhl = (!ready_for_next && !squash_Dhl && !brj_taken_Dhl) || stall_Dhl;
+  // fetch stalls for real hazards, for normal slot-1 steering, but NOT for the synthetic PC-context hold when D is actively redirecting
+  wire stall_Fhl_pcctx_suppress = stall_pcctx_Dhl && !brj_taken_Dhl;
+  assign stall_Fhl = (!ready_for_next && !squash_Dhl && !brj_taken_Dhl)
+                  || ostall_Dhl
+                  || stall_Fhl_pcctx_suppress;
 
   // Next bubble bit
 
@@ -187,14 +189,10 @@ module parc_CoreCtrl
   reg        imemresp1_queue_val_Fhl;
 
   always @ ( posedge clk ) begin
-    // if ( imemresp0_queue_en_Fhl ) begin
-    //   imemresp0_queue_reg_Fhl <= imemresp0_msg_data;
     if ( reset ) begin
       imemresp0_queue_val_Fhl <= 1'b0;
       imemresp1_queue_val_Fhl <= 1'b0;
     end
-    // if ( imemresp1_queue_en_Fhl ) begin
-    //   imemresp1_queue_reg_Fhl <= imemresp1_msg_data;
     else begin
       if ( imemresp0_queue_en_Fhl ) begin
         imemresp0_queue_reg_Fhl <= imemresp0_msg_data;
@@ -205,8 +203,6 @@ module parc_CoreCtrl
       imemresp0_queue_val_Fhl <= imemresp0_queue_val_next_Fhl;
       imemresp1_queue_val_Fhl <= imemresp1_queue_val_next_Fhl;
     end
-    imemresp0_queue_val_Fhl <= imemresp0_queue_val_next_Fhl;
-    imemresp1_queue_val_Fhl <= imemresp1_queue_val_next_Fhl;
   end
 
   //----------------------------------------------------------------------
@@ -223,6 +219,11 @@ module parc_CoreCtrl
     : ( imemresp1_queue_val_Fhl )  ? imemresp1_queue_reg_Fhl
     :                               32'bx;
 
+  // only hand a new pair to decode when both instructions are available, either directly from imem or from the response queue
+  wire imem_pair_val_Fhl
+    = ( imemresp0_val || imemresp0_queue_val_Fhl )
+   && ( imemresp1_val || imemresp1_queue_val_Fhl );
+
   //----------------------------------------------------------------------
   // D <- F
   //----------------------------------------------------------------------
@@ -234,6 +235,7 @@ module parc_CoreCtrl
 
   wire stall_0_Dhl = 1'b0;
   wire stall_1_Dhl = 1'b0; 
+  wire ostall_Dhl;
   wire squash_first_D_inst =
     (inst_val_Dhl && !stall_0_Dhl && stall_1_Dhl);
 
@@ -241,13 +243,19 @@ module parc_CoreCtrl
     if ( reset ) begin
       bubble_Dhl <= 1'b1;
     end
-    else if (!stall_Dhl && squash_Dhl) begin
+    else if (!ostall_Dhl && squash_Dhl) begin
       bubble_Dhl <= 1'b1;
     end
-    else if(!stall_Dhl && brj_taken_Dhl && !ready_for_next) begin
+    // any D-stage redirect consumes the current decode contents immediately
+    // if the redirected fetch pair is not back yet (randdelay), keep D bubbled (instead of re-issuing the same jump/jalr a second time)
+    else if(!ostall_Dhl && brj_taken_Dhl) begin
       bubble_Dhl <= 1'b1;
     end
-    else if( !stall_Dhl && ready_for_next ) begin
+    // when we keep the pair in decode to issue slot 1 next, consume slot 0
+    else if( !ostall_Dhl && steering_mux_sel && !ready_for_next && !bubble_Dhl ) begin
+      ir0_Dhl    <= `PARC_INST_MSG_NOP;
+    end
+    else if( !ostall_Dhl && ready_for_next && imem_pair_val_Fhl ) begin
       ir0_Dhl    <= imemresp0_queue_mux_out_Fhl;
       ir1_Dhl    <= imemresp1_queue_mux_out_Fhl;
       bubble_Dhl <= bubble_next_Fhl;
@@ -635,7 +643,7 @@ module parc_CoreCtrl
     if (reset) begin
       steering_mux_sel <= 1'b1;
     end
-    else if (!stall_Dhl || ((!steering_mux_sel && ir1_brj_taken_Dhl))) begin
+    else if (!ostall_Dhl || ((!steering_mux_sel && ir1_brj_taken_Dhl))) begin
       if (steering_mux_sel == 1'b1 && inst_val_Dhl) begin
         if (!need_stall)
           steering_mux_sel <= 1'b1; 
@@ -1114,11 +1122,43 @@ module parc_CoreCtrl
 
   wire ir1_brj_taken_Dhl = (ir1_Dhl ==? `PARC_INST_MSG_JALR) && inst_val_Dhl;
 
-  assign stall_Dhl = ( stall_X0hl || stall_0_muldiv_use_Dhl || stall_1_muldiv_use_Dhl || stall_1_load_use_Dhl
-                    || stall_0_load_use_Dhl || (!ready_for_next && ir1_brj_taken_Dhl) );
+  // Real hazard stall -- does not include the narrow PC-context hold
+  assign ostall_Dhl = ( stall_X0hl
+                     || stall_0_muldiv_use_Dhl
+                     || stall_1_muldiv_use_Dhl
+                     || stall_1_load_use_Dhl
+                     || stall_0_load_use_Dhl );
+
+  // Track whether the instruction that just entered X0 came from slot 1
+  reg slot1_ctrl_in_flight;
+  always @(posedge clk) begin
+    if (reset || squash_Dhl)
+      slot1_ctrl_in_flight <= 1'b0;
+    else if (!ostall_Dhl)
+      slot1_ctrl_in_flight <= (steering_mux_sel && !ready_for_next && !bubble_Dhl && cs1_is_ctrl_Dhl);
+  end
+
+  // PC-context hold: when issuing slot 0 and slot 1 is control-flow,
+  // hold D so slot 1 can compute its branch/jump target with the right PC base.
+  wire [2:0] br_sel1_Dhl     = cs1[`PARC_INST_MSG_BR_SEL];
+  wire       cs1_is_ctrl_Dhl = cs1[`PARC_INST_MSG_J_EN] || ( br_sel1_Dhl != br_none );
+  // wire       stall_pcctx_Dhl = !steering_mux_sel
+  //                           && !bubble_Dhl
+  //                           && !squash_Dhl
+  //                           && cs1_is_ctrl_Dhl;
+  wire stall_pcctx_Dhl = ( steering_mux_sel && !ready_for_next && !bubble_Dhl && !squash_Dhl
+                      && cs1_is_ctrl_Dhl )
+                    || ( slot1_ctrl_in_flight
+                      && inst_val_X0hl
+                      && (br_sel_X0hl != br_none)
+                      && !brj_taken_X0hl
+                      && !squash_Dhl );
+
+  assign stall_Dhl = ostall_Dhl || stall_pcctx_Dhl;
   // Next bubble bit
 
-  wire bubble_sel_Dhl  = ( squash_Dhl || (stall_Dhl && !(!ready_for_next && ir1_brj_taken_Dhl)));
+  // bubble_sel uses ostall only -- the narrow PC-context hold must not inject decode bubbles
+  wire bubble_sel_Dhl = ( squash_Dhl || ostall_Dhl );
   wire bubble_next_Dhl = ( !bubble_sel_Dhl ) ? bubble_Dhl
                        : ( bubble_sel_Dhl )  ? 1'b1
                        :                       1'bx;
@@ -1692,6 +1732,7 @@ module parc_CoreCtrl
   reg [31:0] num_inst    = 32'b0;
   reg [31:0] num_cycles  = 32'b0;
   reg        stats_en    = 1'b0; // Used for enabling stats on asm tests
+  wire       dual_issue_Dhl = inst_val_Dhl && steering_mux_sel && !need_stall;
 
   always @( posedge clk ) begin
     if ( !reset ) begin
@@ -1703,8 +1744,8 @@ module parc_CoreCtrl
 
         // Count instructions for every cycle not squashed or stalled
 
-        if ( inst_val_Dhl && !stall_Dhl ) begin
-          num_inst = num_inst + 1;
+        if ( inst_val_Dhl && !ostall_Dhl ) begin
+          num_inst = num_inst + ( dual_issue_Dhl ? 32'd2 : 32'd1 );
         end
 
       end
@@ -1717,5 +1758,3 @@ module parc_CoreCtrl
 endmodule
 
 `endif
-
-

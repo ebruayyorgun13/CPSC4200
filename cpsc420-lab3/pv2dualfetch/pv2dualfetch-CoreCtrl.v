@@ -157,9 +157,12 @@ module parc_CoreCtrl
 
   // Stall in F if D is stalled
 
-  //assign stall_Fhl = stall_Dhl;
-  // Fetch stalls when it is in the middle of steering the second instruction
-  assign stall_Fhl = (!steering_mux_sel && !squash_Dhl && !brj_taken_Dhl) || stall_Dhl;
+  // Fetch stalls when it is in the middle of steering the second instruction.
+  // The narrow D-stage PC-context hold should not suppress an active redirect.
+  wire stall_Fhl_pcctx_suppress = stall_pcctx_Dhl && !brj_taken_Dhl;
+  assign stall_Fhl = (!steering_mux_sel && !squash_Dhl && !brj_taken_Dhl)
+                  || ostall_Dhl
+                  || stall_Fhl_pcctx_suppress;
 
   // Next bubble bit
 
@@ -187,14 +190,20 @@ module parc_CoreCtrl
   reg        imemresp1_queue_val_Fhl;
 
   always @ ( posedge clk ) begin
-    if ( imemresp0_queue_en_Fhl ) begin
-      imemresp0_queue_reg_Fhl <= imemresp0_msg_data;
+    if ( reset ) begin
+      imemresp0_queue_val_Fhl <= 1'b0;
+      imemresp1_queue_val_Fhl <= 1'b0;
     end
-    if ( imemresp1_queue_en_Fhl ) begin
-      imemresp1_queue_reg_Fhl <= imemresp1_msg_data;
+    else begin
+      if ( imemresp0_queue_en_Fhl ) begin
+        imemresp0_queue_reg_Fhl <= imemresp0_msg_data;
+      end
+      if ( imemresp1_queue_en_Fhl ) begin
+        imemresp1_queue_reg_Fhl <= imemresp1_msg_data;
+      end
+      imemresp0_queue_val_Fhl <= imemresp0_queue_val_next_Fhl;
+      imemresp1_queue_val_Fhl <= imemresp1_queue_val_next_Fhl;
     end
-    imemresp0_queue_val_Fhl <= imemresp0_queue_val_next_Fhl;
-    imemresp1_queue_val_Fhl <= imemresp1_queue_val_next_Fhl;
   end
 
   //----------------------------------------------------------------------
@@ -211,6 +220,10 @@ module parc_CoreCtrl
     : ( imemresp1_queue_val_Fhl )  ? imemresp1_queue_reg_Fhl
     :                               32'bx;
 
+  wire imem_pair_val_Fhl
+    = ( imemresp0_val || imemresp0_queue_val_Fhl )
+    && ( imemresp1_val || imemresp1_queue_val_Fhl );
+
   //----------------------------------------------------------------------
   // D <- F
   //----------------------------------------------------------------------
@@ -218,6 +231,7 @@ module parc_CoreCtrl
   reg [31:0] ir0_Dhl;
   reg [31:0] ir1_Dhl;
   reg        bubble_Dhl;
+  wire       ostall_Dhl;
 
   wire stall_0_Dhl = 1'b0;
   wire stall_1_Dhl = 1'b0; 
@@ -226,18 +240,27 @@ module parc_CoreCtrl
 
   always @ ( posedge clk ) begin
     if ( reset ) begin
+      ir0_Dhl    <= `PARC_INST_MSG_NOP;
+      ir1_Dhl    <= `PARC_INST_MSG_NOP;
       bubble_Dhl <= 1'b1;
     end
-    else if (!stall_Dhl && squash_Dhl) begin
+    else if (!ostall_Dhl && ( squash_Dhl || brj_taken_Dhl )) begin
+      ir0_Dhl    <= `PARC_INST_MSG_NOP;
+      ir1_Dhl    <= `PARC_INST_MSG_NOP;
       bubble_Dhl <= 1'b1;
     end
-    else if(!stall_Dhl && brj_taken_Dhl && !steering_mux_sel) begin
-      bubble_Dhl <= 1'b1;
-    end
-    else if( !stall_Dhl && steering_mux_sel ) begin
+    else if( !ostall_Dhl && steering_mux_sel && imem_pair_val_Fhl ) begin
       ir0_Dhl    <= imemresp0_queue_mux_out_Fhl;
       ir1_Dhl    <= imemresp1_queue_mux_out_Fhl;
       bubble_Dhl <= bubble_next_Fhl;
+    end
+    else if( !ostall_Dhl && steering_mux_sel ) begin
+      ir0_Dhl    <= `PARC_INST_MSG_NOP;
+      ir1_Dhl    <= `PARC_INST_MSG_NOP;
+      bubble_Dhl <= 1'b1;
+    end
+    else if( !ostall_Dhl && !steering_mux_sel ) begin
+      ir0_Dhl    <= `PARC_INST_MSG_NOP;
     end
   end
 
@@ -446,9 +469,16 @@ module parc_CoreCtrl
   reg [cs_sz-1:0] cs0;
   reg [cs_sz-1:0] cs1;
 
+  localparam [cs_sz-1:0] cs_invalid
+    = { n,  n,    br_none, pm_p,   am_x,    n, bm_x,    n, alu_x,
+        md_x,    n, mdm_x, em_x,   nr,  ml_x, dmm_x,  wm_x,   n, rx, n };
+
+
   always @ (*) begin
 
-    cs0 = {cs_sz{1'bx}}; // Default to invalid instruction
+    // cs0 = {cs_sz{1'bx}}; // Default to invalid instruction
+    cs0 = cs_invalid;
+
 
     casez ( ir0_Dhl )
 
@@ -515,7 +545,9 @@ module parc_CoreCtrl
 
   always @ (*) begin
 
-    cs1 = {cs_sz{1'bx}}; // Default to invalid instruction
+    // cs1 = {cs_sz{1'bx}}; // Default to invalid instruction
+    cs1 = cs_invalid;
+
 
     casez ( ir1_Dhl )
 
@@ -592,8 +624,21 @@ module parc_CoreCtrl
     if (reset) begin
       steering_mux_sel <= 1'b1;
     end
-    else if (!stall_Dhl || ((!steering_mux_sel && ir1_brj_taken_Dhl))) begin
-      steering_mux_sel <= ~steering_mux_sel;
+    // else if (!stall_Dhl || ((!steering_mux_sel && ir1_brj_taken_Dhl))) begin
+    else if ( !ostall_Dhl ) begin
+      // steering_mux_sel <= ~steering_mux_sel;
+      if ( squash_Dhl || brj_taken_Dhl ) begin
+        steering_mux_sel <= 1'b1;
+      end
+      else if ( !steering_mux_sel ) begin
+        steering_mux_sel <= 1'b1;
+      end
+      else if ( imem_pair_val_Fhl ) begin
+        steering_mux_sel <= 1'b0;
+      end
+      else begin
+        steering_mux_sel <= 1'b1;
+      end
     end
   end
 
@@ -615,11 +660,19 @@ module parc_CoreCtrl
   // Jump and Branch Controls
 
   wire       brj_taken_Dhl = ( inst_val_Dhl && curr_cs[`PARC_INST_MSG_J_EN] );
-  wire ir1_is_jalr = imemresp1_queue_mux_out_Fhl ==  `PARC_INST_MSG_JALR;
-  wire [cs_sz-1:0] potent_ir1_jalr = ir1_is_jalr ? { y,  y,    br_none, pm_r,   am_0,    y, bm_pc,   n, alu_add,  md_x,    n, mdm_x, em_alu, nr,  ml_x, dmm_x,  wm_alu, y,  rd0, n   } : 38'b0; 
-  //wire ir1_brj_taken_Dhl = ( inst_val_Dhl && potent_ir1_jalr[`PARC_INST_MSG_J_EN]);
-  //wire ir1_brj_taken_Dhl = ( inst_val_Dhl && cs1[`PARC_INST_MSG_J_EN]);
+  // wire ir1_is_jalr = imemresp1_queue_mux_out_Fhl ==  `PARC_INST_MSG_JALR;
+  // wire [cs_sz-1:0] potent_ir1_jalr = ir1_is_jalr ? { y,  y,    br_none, pm_r,   am_0,    y, bm_pc,   n, alu_add,  md_x,    n, mdm_x, em_alu, nr,  ml_x, dmm_x,  wm_alu, y,  rd0, n   } : 38'b0; 
+  // //wire ir1_brj_taken_Dhl = ( inst_val_Dhl && potent_ir1_jalr[`PARC_INST_MSG_J_EN]);
+  // //wire ir1_brj_taken_Dhl = ( inst_val_Dhl && cs1[`PARC_INST_MSG_J_EN]);
   wire [2:0] br_sel_Dhl    = curr_cs[`PARC_INST_MSG_BR_SEL];
+  wire [2:0] br_sel1_Dhl   = cs1[`PARC_INST_MSG_BR_SEL];
+  wire       cs1_is_ctrl_Dhl
+    = cs1[`PARC_INST_MSG_J_EN] || ( br_sel1_Dhl != br_none );
+  wire       stall_pcctx_Dhl
+    = !steering_mux_sel
+    && !bubble_Dhl
+    && !squash_Dhl
+    && cs1_is_ctrl_Dhl;
 
   // PC Mux Select
 
@@ -865,7 +918,7 @@ module parc_CoreCtrl
 
   wire rf0_wen_Dhl         = curr_cs[`PARC_INST_MSG_RF_WEN];
   wire [4:0] rf0_waddr_Dhl = curr_cs[`PARC_INST_MSG_RF_WADDR];
-  assign rfA_wen_Dhl = curr_cs[`PARC_INST_MSG_RF_WEN];
+  // assign rfA_wen_Dhl = curr_cs[`PARC_INST_MSG_RF_WEN];
 
   // Coprocessor write enable
 
@@ -973,13 +1026,16 @@ module parc_CoreCtrl
 
   // Aggregate Stall Signal
 
-  wire ir1_brj_taken_Dhl = (ir1_Dhl ==? `PARC_INST_MSG_JALR) && inst_val_Dhl;
+  // wire ir1_brj_taken_Dhl = (ir1_Dhl ==? `PARC_INST_MSG_JALR) && inst_val_Dhl;
 
-  assign stall_Dhl = ( stall_X0hl || stall_0_muldiv_use_Dhl
-                    || stall_0_load_use_Dhl || (!steering_mux_sel && ir1_brj_taken_Dhl) );
+  assign ostall_Dhl = ( stall_X0hl || stall_0_muldiv_use_Dhl
+                     || stall_0_load_use_Dhl );
+
+  assign stall_Dhl = ostall_Dhl || stall_pcctx_Dhl;
   // Next bubble bit
 
-  wire bubble_sel_Dhl  = ( squash_Dhl || (stall_Dhl && !(!steering_mux_sel && ir1_brj_taken_Dhl)));
+  // wire bubble_sel_Dhl  = ( squash_Dhl || (stall_Dhl && !(!steering_mux_sel && ir1_brj_taken_Dhl)));
+  wire bubble_sel_Dhl = ( squash_Dhl || ostall_Dhl );
   wire bubble_next_Dhl = ( !bubble_sel_Dhl ) ? bubble_Dhl
                        : ( bubble_sel_Dhl )  ? 1'b1
                        :                       1'bx;
@@ -1050,7 +1106,11 @@ module parc_CoreCtrl
 
   // Muldiv request
 
-  assign muldivreq_val = muldivreq_val_Dhl && inst_val_Dhl;
+  // assign muldivreq_val = muldivreq_val_Dhl && inst_val_Dhl;
+  assign muldivreq_val = muldivreq_val_Dhl
+                      && inst_val_Dhl
+                      && !ostall_Dhl
+                      && !stall_X0hl;
   assign muldivresp_rdy = 1'b1;
   assign muldiv_stall_mult1 = stall_X1hl;
 
@@ -1218,6 +1278,7 @@ module parc_CoreCtrl
   always @ ( posedge clk ) begin
     if ( reset ) begin
       bubble_X2hl <= 1'b1;
+      dmemresp_queue_val_X1hl <= 1'b0;
     end
     else if( !stall_X2hl ) begin
       ir0_X2hl              <= ir0_X1hl;
@@ -1230,8 +1291,9 @@ module parc_CoreCtrl
       execute_mux_sel_X2hl  <= execute_mux_sel_X1hl;
 
       bubble_X2hl           <= bubble_next_X1hl;
+      dmemresp_queue_val_X1hl <= dmemresp_queue_val_next_X1hl;
     end
-    dmemresp_queue_val_X1hl <= dmemresp_queue_val_next_X1hl;
+    // dmemresp_queue_val_X1hl <= dmemresp_queue_val_next_X1hl;
   end
 
   //----------------------------------------------------------------------
@@ -1483,33 +1545,33 @@ module parc_CoreCtrl
 
   `endif
 
-//========================================================================
-// Assertions
-//========================================================================
-// Detect illegal instructions and terminate the simulation if multiple
-// illegal instructions are detected in succession.
+// //========================================================================
+// // Assertions
+// //========================================================================
+// // Detect illegal instructions and terminate the simulation if multiple
+// // illegal instructions are detected in succession.
 
-  `ifndef SYNTHESIS
+//   `ifndef SYNTHESIS
 
-  reg overload = 1'b0;
+//   reg overload = 1'b0;
 
-  always @ ( posedge clk ) begin
-    if (( !curr_cs[`PARC_INST_MSG_INST_VAL] && !reset ) 
-     || ( !cs1[`PARC_INST_MSG_INST_VAL] && !reset )) begin
-      $display(" RTL-ERROR : %m : Illegal instruction!");
+//   always @ ( posedge clk ) begin
+//     if (( !curr_cs[`PARC_INST_MSG_INST_VAL] && !reset ) 
+//      || ( !cs1[`PARC_INST_MSG_INST_VAL] && !reset )) begin
+//       $display(" RTL-ERROR : %m : Illegal instruction!");
 
-      if ( overload == 1'b1 ) begin
-        $finish;
-      end
+//       if ( overload == 1'b1 ) begin
+//         $finish;
+//       end
 
-      overload = 1'b1;
-    end
-    else begin
-      overload = 1'b0;
-    end
-  end
+//       overload = 1'b1;
+//     end
+//     else begin
+//       overload = 1'b0;
+//     end
+//   end
 
-  `endif
+//   `endif
 
 //========================================================================
 // Stats
@@ -1531,7 +1593,7 @@ module parc_CoreCtrl
 
         // Count instructions for every cycle not squashed or stalled
 
-        if ( inst_val_Dhl && !stall_Dhl ) begin
+        if ( inst_val_Dhl && !ostall_Dhl ) begin
           num_inst = num_inst + 1;
         end
 
@@ -1545,5 +1607,3 @@ module parc_CoreCtrl
 endmodule
 
 `endif
-
-
