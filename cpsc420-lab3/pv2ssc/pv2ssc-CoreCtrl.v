@@ -1157,11 +1157,46 @@ module parc_CoreCtrl
 
   wire squash_Dhl = ( inst_val_X0hl && brj_taken_X0hl );
 
-  // For Part 2 of this lab, replace the multdiv and ld stall logic with a scoreboard based stall logic
+  // For Part 2 of this lab, replace the multdiv and ld stall logic with a
+  // scoreboard based stall logic. Keep the current live equations as the
+  // source of truth until the scoreboard-derived versions are proven
+  // equivalent across the full test matrix.
+
+  wire sb_stall_0_muldiv_use_Dhl = inst_val_Dhl && (
+                              ( sb_rs0_AX0_byp_Dhl && is_muldiv_X0hl )
+                           || ( sb_rs0_AX1_byp_Dhl && is_muldiv_X1hl )
+                           || ( sb_rs0_AX2_byp_Dhl && is_muldiv_X2hl )
+                           || ( sb_rs0_AX3_byp_Dhl && is_muldiv_X3hl )
+                           || ( sb_rt0_AX0_byp_Dhl && is_muldiv_X0hl )
+                           || ( sb_rt0_AX1_byp_Dhl && is_muldiv_X1hl )
+                           || ( sb_rt0_AX2_byp_Dhl && is_muldiv_X2hl )
+                           || ( sb_rt0_AX3_byp_Dhl && is_muldiv_X3hl ));
+
+  wire sb_stall_1_muldiv_use_Dhl = inst_val_Dhl && (
+                              ( sb_rs1_AX0_byp_Dhl && is_muldiv_X0hl )
+                           || ( sb_rs1_AX1_byp_Dhl && is_muldiv_X1hl )
+                           || ( sb_rs1_AX2_byp_Dhl && is_muldiv_X2hl )
+                           || ( sb_rs1_AX3_byp_Dhl && is_muldiv_X3hl )
+                           || ( sb_rt1_AX0_byp_Dhl && is_muldiv_X0hl )
+                           || ( sb_rt1_AX1_byp_Dhl && is_muldiv_X1hl )
+                           || ( sb_rt1_AX2_byp_Dhl && is_muldiv_X2hl )
+                           || ( sb_rt1_AX3_byp_Dhl && is_muldiv_X3hl ));
+
+  wire sb_stall_0_load_use_Dhl = inst_val_Dhl && (
+                            ( sb_rs0_AX0_byp_Dhl && is_load_X0hl )
+                         || ( sb_rs0_AX1_byp_Dhl && is_load_X1hl )
+                         || ( sb_rt0_AX0_byp_Dhl && is_load_X0hl )
+                         || ( sb_rt0_AX1_byp_Dhl && is_load_X1hl ) );
+
+  wire sb_stall_1_load_use_Dhl = inst_val_Dhl && (
+                            ( sb_rs1_AX0_byp_Dhl && is_load_X0hl )
+                         || ( sb_rs1_AX1_byp_Dhl && is_load_X1hl )
+                         || ( sb_rt1_AX0_byp_Dhl && is_load_X0hl )
+                         || ( sb_rt1_AX1_byp_Dhl && is_load_X1hl ) );
 
   // Stall in D if muldiv unit is not ready and there is a valid request
   
-  wire stall_0_muldiv_use_Dhl = inst_val_Dhl && (
+  wire live_stall_0_muldiv_use_Dhl = inst_val_Dhl && (
                               ( inst_val_X0hl && rs0_en_Dhl && rfA_wen_X0hl
                                 && ( rs0_addr_Dhl == rfA_waddr_X0hl )
                                 && ( rfA_waddr_X0hl != 5'd0 ) && is_muldiv_X0hl )
@@ -1186,7 +1221,7 @@ module parc_CoreCtrl
                            || ( inst_val_X3hl && rt0_en_Dhl && rfA_wen_X3hl
                                 && ( rt0_addr_Dhl == rfA_waddr_X3hl )
                                 && ( rfA_waddr_X3hl != 5'd0 ) && is_muldiv_X3hl ));
-  wire stall_1_muldiv_use_Dhl = inst_val_Dhl && (
+  wire live_stall_1_muldiv_use_Dhl = inst_val_Dhl && (
                               ( inst_val_X0hl && rs1_en_Dhl && rfA_wen_X0hl
                                 && ( rs1_addr_Dhl == rfA_waddr_X0hl )
                                 && ( rfA_waddr_X0hl != 5'd0 ) && is_muldiv_X0hl )
@@ -1216,7 +1251,7 @@ module parc_CoreCtrl
   // the source registers match the destination register of of a valid
   // instruction in a later stage.
 
-  wire stall_0_load_use_Dhl = inst_val_Dhl && (
+  wire live_stall_0_load_use_Dhl = inst_val_Dhl && (
                             ( inst_val_X0hl && rs0_en_Dhl && rfA_wen_X0hl
                               && ( rs0_addr_Dhl == rfA_waddr_X0hl )
                               && ( rfA_waddr_X0hl != 5'd0 ) && is_load_X0hl )
@@ -1230,7 +1265,7 @@ module parc_CoreCtrl
                               && ( rt0_addr_Dhl == rfA_waddr_X1hl )
                               && ( rfA_waddr_X1hl != 5'd0 ) && is_load_X1hl ) );
 
-  wire stall_1_load_use_Dhl = inst_val_Dhl && (
+  wire live_stall_1_load_use_Dhl = inst_val_Dhl && (
                             ( inst_val_X0hl && rs1_en_Dhl && rfA_wen_X0hl
                               && ( rs1_addr_Dhl == rfA_waddr_X0hl )
                               && ( rfA_waddr_X0hl != 5'd0 ) && is_load_X0hl )
@@ -1243,6 +1278,33 @@ module parc_CoreCtrl
                          || ( inst_val_X1hl && rt1_en_Dhl && rfA_wen_X1hl
                               && ( rt1_addr_Dhl == rfA_waddr_X1hl )
                               && ( rfA_waddr_X1hl != 5'd0 ) && is_load_X1hl ) );
+
+  wire stall_0_muldiv_use_Dhl = sb_stall_0_muldiv_use_Dhl;
+  wire stall_1_muldiv_use_Dhl = sb_stall_1_muldiv_use_Dhl;
+  wire stall_0_load_use_Dhl   = sb_stall_0_load_use_Dhl;
+  wire stall_1_load_use_Dhl   = sb_stall_1_load_use_Dhl;
+
+  wire sb_stall_mismatch_Dhl =
+       ( sb_stall_0_muldiv_use_Dhl != live_stall_0_muldiv_use_Dhl )
+    || ( sb_stall_1_muldiv_use_Dhl != live_stall_1_muldiv_use_Dhl )
+    || ( sb_stall_0_load_use_Dhl   != live_stall_0_load_use_Dhl )
+    || ( sb_stall_1_load_use_Dhl   != live_stall_1_load_use_Dhl );
+
+  reg sb_stall_mismatch_reported;
+  always @( posedge clk ) begin
+    if ( reset ) begin
+      sb_stall_mismatch_reported <= 1'b0;
+    end
+    else if ( sb_stall_mismatch_Dhl && !sb_stall_mismatch_reported ) begin
+      sb_stall_mismatch_reported <= 1'b1;
+      $display("SB-STALL-MISMATCH t=%0t ir0=%h ir1=%h live_md0=%b sb_md0=%b live_md1=%b sb_md1=%b live_ld0=%b sb_ld0=%b live_ld1=%b sb_ld1=%b",
+               $time, ir0_Dhl, ir1_Dhl,
+               live_stall_0_muldiv_use_Dhl, sb_stall_0_muldiv_use_Dhl,
+               live_stall_1_muldiv_use_Dhl, sb_stall_1_muldiv_use_Dhl,
+               live_stall_0_load_use_Dhl,   sb_stall_0_load_use_Dhl,
+               live_stall_1_load_use_Dhl,   sb_stall_1_load_use_Dhl);
+    end
+  end
 
   // Aggregate Stall Signal
 
