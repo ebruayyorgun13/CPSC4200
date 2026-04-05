@@ -219,24 +219,55 @@ module parc_CoreCtrl
     : ( imemresp1_queue_val_Fhl )  ? imemresp1_queue_reg_Fhl
     :                               32'bx;
 
-  // If fetched slot 0 is an unconditional redirect, fetched slot 1 is wrong path and should never be consumed by decode
-  // Clean so a hole/uninitialized word after the redirect cannot poison D
-  wire fetched_slot0_redirect_Fhl
-    = ( imemresp0_queue_mux_out_Fhl ==? `PARC_INST_MSG_J    )
-   || ( imemresp0_queue_mux_out_Fhl ==? `PARC_INST_MSG_JAL  )
-   || ( imemresp0_queue_mux_out_Fhl ==? `PARC_INST_MSG_JR   )
-   || ( imemresp0_queue_mux_out_Fhl ==? `PARC_INST_MSG_JALR );
+  // Decode consumes mux-selected frontend payloads, so pair-valid must be
+  // aligned with those same payloads.
 
   wire        imemresp0_mux_val_Fhl = imemresp0_queue_val_Fhl || imemresp0_val;
   wire        imemresp1_mux_val_Fhl = imemresp1_queue_val_Fhl || imemresp1_val;
   wire [31:0] imemresp0_mux_out_Fhl = imemresp0_queue_mux_out_Fhl;
+
+  // Detect unconditional redirects directly from the fetched instruction
+  // bits so slot 1 can be sanitized before decode sees it.
+  wire [5:0] fetched_slot0_opcode_Fhl = imemresp0_mux_out_Fhl[`PARC_INST_MSG_OPCODE];
+  wire [4:0] fetched_slot0_rt_Fhl     = imemresp0_mux_out_Fhl[`PARC_INST_MSG_RT];
+  wire [4:0] fetched_slot0_rd_Fhl     = imemresp0_mux_out_Fhl[`PARC_INST_MSG_RD];
+  wire [4:0] fetched_slot0_shamt_Fhl  = imemresp0_mux_out_Fhl[`PARC_INST_MSG_SHAMT];
+  wire [5:0] fetched_slot0_func_Fhl   = imemresp0_mux_out_Fhl[`PARC_INST_MSG_FUNC];
+
+  wire fetched_slot0_is_j_Fhl
+    = ( fetched_slot0_opcode_Fhl == 6'b000010 );
+
+  wire fetched_slot0_is_jal_Fhl
+    = ( fetched_slot0_opcode_Fhl == 6'b000011 );
+
+  wire fetched_slot0_is_jr_Fhl
+    = ( fetched_slot0_opcode_Fhl == 6'b000000 )
+   && ( fetched_slot0_rt_Fhl     == 5'b00000  )
+   && ( fetched_slot0_rd_Fhl     == 5'b00000  )
+   && ( fetched_slot0_shamt_Fhl  == 5'b00000  )
+   && ( fetched_slot0_func_Fhl   == 6'b001000 );
+
+  wire fetched_slot0_is_jalr_Fhl
+    = ( fetched_slot0_opcode_Fhl == 6'b000000 )
+   && ( fetched_slot0_rt_Fhl     == 5'b00000  )
+   && ( fetched_slot0_shamt_Fhl  == 5'b00000  )
+   && ( fetched_slot0_func_Fhl   == 6'b001001 );
+
+  wire fetched_slot0_redirect_Fhl
+    = fetched_slot0_is_j_Fhl
+   || fetched_slot0_is_jal_Fhl
+   || fetched_slot0_is_jr_Fhl
+   || fetched_slot0_is_jalr_Fhl;
+
   wire [31:0] imemresp1_mux_out_Fhl
     = fetched_slot0_redirect_Fhl ? `PARC_INST_MSG_NOP
-    :                             imemresp1_queue_mux_out_Fhl;
+    :                              imemresp1_queue_mux_out_Fhl;
 
-  // Only hand a new pair to decode when both mux-selected instructions are valid
-  // For an unconditional redirect in slot 0, slot 1 is explicitly replaced with a NOP
-  wire imem_pair_val_Fhl = imemresp0_mux_val_Fhl && ( fetched_slot0_redirect_Fhl || imemresp1_mux_val_Fhl );
+  // Only hand a new pair to decode when the exact payloads decode will
+  // consume are available.
+  wire imem_pair_val_Fhl
+    = imemresp0_mux_val_Fhl
+   && ( fetched_slot0_redirect_Fhl || imemresp1_mux_val_Fhl );
 
   //----------------------------------------------------------------------
   // D <- F
@@ -418,6 +449,23 @@ module parc_CoreCtrl
   localparam wm_x   = 1'bx; // Don't care
   localparam wm_alu = 1'd0; // Use ALU output
   localparam wm_mem = 1'd1; // Use data memory response
+
+  // Scoreboard metadata encodings
+
+  localparam sb_pipe_a    = 1'b0;
+  localparam sb_pipe_b    = 1'b1;
+
+  localparam [2:0] sb_stage_none = 3'd0;
+  localparam [2:0] sb_stage_x0   = 3'd1;
+  localparam [2:0] sb_stage_x1   = 3'd2;
+  localparam [2:0] sb_stage_x2   = 3'd3;
+  localparam [2:0] sb_stage_x3   = 3'd4;
+  localparam [2:0] sb_stage_w    = 3'd5;
+
+  localparam [1:0] sb_kind_none   = 2'd0;
+  localparam [1:0] sb_kind_alu    = 2'd1;
+  localparam [1:0] sb_kind_load   = 2'd2;
+  localparam [1:0] sb_kind_muldiv = 2'd3;
 
   //----------------------------------------------------------------------
   // Decode Stage: Logic
@@ -646,16 +694,24 @@ module parc_CoreCtrl
   wire has_hazard = (waw_hazard || raw_hazard);
 
   wire need_stall = inst_val_Dhl && (both_not_alu || has_hazard);
+
+  // Serialize slot 1 when slot 0 is unresolved control-flow
+  // we exclude j/jal because fetched slot 1 is already sanitized in the frontend
   wire slot0_unresolved_ctrl = inst_val_Dhl
                             && ( ( cs0[`PARC_INST_MSG_BR_SEL] != br_none )
                               || ( cs0[`PARC_INST_MSG_J_EN]
                                 && ( cs0[`PARC_INST_MSG_PC_SEL] == pm_r ) ) );
+
   wire serialize_slot1_Dhl = inst_val_Dhl
-                          && ( both_not_alu || has_hazard || slot0_unresolved_ctrl );
+                          && ( both_not_alu
+                            || has_hazard
+                            || slot0_unresolved_ctrl );
 
   wire ready_for_next = (steering_mux_sel && !serialize_slot1_Dhl) || !steering_mux_sel;
 
   reg steering_mux_sel;
+
+  //reg [cs_sz-1:0] curr_cs;
 
   always@(posedge clk) begin
     if (reset) begin
@@ -715,6 +771,10 @@ module parc_CoreCtrl
   // Jump and Branch Controls
 
   wire       brj_taken_Dhl = ( inst_val_Dhl && pipeA_cs[`PARC_INST_MSG_J_EN] );
+  wire ir1_is_jalr = imemresp1_queue_mux_out_Fhl ==  `PARC_INST_MSG_JALR;
+  wire [cs_sz-1:0] potent_ir1_jalr = ir1_is_jalr ? { y,  y,    br_none, pm_r,   am_0,    y, bm_pc,   n, alu_add,  md_x,    n, mdm_x, em_alu, nr,  ml_x, dmm_x,  wm_alu, y,  rd0, n   } : 38'b0; 
+  //wire ir1_brj_taken_Dhl = ( inst_val_Dhl && potent_ir1_jalr[`PARC_INST_MSG_J_EN]);
+  //wire ir1_brj_taken_Dhl = ( inst_val_Dhl && cs1[`PARC_INST_MSG_J_EN]);
   wire [2:0] br_sel_Dhl    = pipeA_cs[`PARC_INST_MSG_BR_SEL];
 
   // PC Mux Select
@@ -748,8 +808,8 @@ module parc_CoreCtrl
   //wire [4:0] rs0_addr_Dhl  = inst0_rs_Dhl;
   //wire [4:0] rt0_addr_Dhl  = inst0_rt_Dhl;
 
-  wire pipeA_gets_ir1 = (serialize_slot1_Dhl && ready_for_next) || (!serialize_slot1_Dhl && ir0_alu_only && !ir1_alu_only);
-  wire pipeB_gets_ir0 = (!serialize_slot1_Dhl && ir0_alu_only && !ir1_alu_only);
+  wire pipeA_gets_ir1 = ((both_not_alu || has_hazard) && ready_for_next) || (!(both_not_alu || has_hazard) && ir0_alu_only && !ir1_alu_only);
+  wire pipeB_gets_ir0 = (!(both_not_alu || has_hazard) && ir0_alu_only && !ir1_alu_only);
 
   wire [4:0] rs0_addr_Dhl  = pipeA_gets_ir1 ? inst1_rs_Dhl : inst0_rs_Dhl;
   wire [4:0] rt0_addr_Dhl  = pipeA_gets_ir1 ? inst1_rt_Dhl : inst0_rt_Dhl;
@@ -763,309 +823,115 @@ module parc_CoreCtrl
   wire       rs1_en_Dhl    = pipeB_cs[`PARC_INST_MSG_RS_EN];
   wire       rt1_en_Dhl    = pipeB_cs[`PARC_INST_MSG_RT_EN];
 
-  // Scoreboard producer slots
 
-  localparam sb_slot_AX0 = 4'd0;
-  localparam sb_slot_BX0 = 4'd1;
-  localparam sb_slot_AX1 = 4'd2;
-  localparam sb_slot_BX1 = 4'd3;
-  localparam sb_slot_AX2 = 4'd4;
-  localparam sb_slot_BX2 = 4'd5;
-  localparam sb_slot_AX3 = 4'd6;
-  localparam sb_slot_BX3 = 4'd7;
-  localparam sb_slot_AW  = 4'd8;
-  localparam sb_slot_BW  = 4'd9;
-
-  integer sb_i;
-  reg       sb_valid_slot_Dhl [0:9];
-  reg [4:0] sb_dest_slot_Dhl  [0:9];
-
-  always @(*) begin
-    for ( sb_i = 0; sb_i < 10; sb_i = sb_i + 1 ) begin
-      sb_valid_slot_Dhl[sb_i] = 1'b0;
-      sb_dest_slot_Dhl[sb_i]  = 5'd0;
-    end
-
-    sb_valid_slot_Dhl[sb_slot_AX0] = inst_val_X0hl && rfA_wen_X0hl && ( rfA_waddr_X0hl != 5'd0 );
-    sb_dest_slot_Dhl[sb_slot_AX0]  = rfA_waddr_X0hl;
-
-    sb_valid_slot_Dhl[sb_slot_BX0] = inst_val_X0hl && rfB_wen_X0hl && ( rfB_waddr_X0hl != 5'd0 );
-    sb_dest_slot_Dhl[sb_slot_BX0]  = rfB_waddr_X0hl;
-
-    sb_valid_slot_Dhl[sb_slot_AX1] = inst_val_X1hl && rfA_wen_X1hl && ( rfA_waddr_X1hl != 5'd0 );
-    sb_dest_slot_Dhl[sb_slot_AX1]  = rfA_waddr_X1hl;
-
-    sb_valid_slot_Dhl[sb_slot_BX1] = inst_val_X1hl && rfB_wen_X1hl && ( rfB_waddr_X1hl != 5'd0 );
-    sb_dest_slot_Dhl[sb_slot_BX1]  = rfB_waddr_X1hl;
-
-    sb_valid_slot_Dhl[sb_slot_AX2] = inst_val_X2hl && rfA_wen_X2hl && ( rfA_waddr_X2hl != 5'd0 );
-    sb_dest_slot_Dhl[sb_slot_AX2]  = rfA_waddr_X2hl;
-
-    sb_valid_slot_Dhl[sb_slot_BX2] = inst_val_X2hl && rfB_wen_X2hl && ( rfB_waddr_X2hl != 5'd0 );
-    sb_dest_slot_Dhl[sb_slot_BX2]  = rfB_waddr_X2hl;
-
-    sb_valid_slot_Dhl[sb_slot_AX3] = inst_val_X3hl && rfA_wen_X3hl && ( rfA_waddr_X3hl != 5'd0 );
-    sb_dest_slot_Dhl[sb_slot_AX3]  = rfA_waddr_X3hl;
-
-    sb_valid_slot_Dhl[sb_slot_BX3] = inst_val_X3hl && rfB_wen_X3hl && ( rfB_waddr_X3hl != 5'd0 );
-    sb_dest_slot_Dhl[sb_slot_BX3]  = rfB_waddr_X3hl;
-
-    sb_valid_slot_Dhl[sb_slot_AW]  = inst_val_Whl && rf0_wen_Whl && ( rf0_waddr_Whl != 5'd0 );
-    sb_dest_slot_Dhl[sb_slot_AW]   = rf0_waddr_Whl;
-
-    sb_valid_slot_Dhl[sb_slot_BW]  = inst_val_Whl && rf1_wen_Whl && ( rf1_waddr_Whl != 5'd0 );
-    sb_dest_slot_Dhl[sb_slot_BW]   = rf1_waddr_Whl;
-  end
-
-  wire sb_rs0_AX0_byp_Dhl = rs0_en_Dhl && ( rs0_addr_Dhl != 5'd0 ) && sb_valid_slot_Dhl[sb_slot_AX0] && ( rs0_addr_Dhl == sb_dest_slot_Dhl[sb_slot_AX0] );
-  wire sb_rs0_BX0_byp_Dhl = rs0_en_Dhl && ( rs0_addr_Dhl != 5'd0 ) && sb_valid_slot_Dhl[sb_slot_BX0] && ( rs0_addr_Dhl == sb_dest_slot_Dhl[sb_slot_BX0] );
-  wire sb_rs0_AX1_byp_Dhl = rs0_en_Dhl && ( rs0_addr_Dhl != 5'd0 ) && sb_valid_slot_Dhl[sb_slot_AX1] && ( rs0_addr_Dhl == sb_dest_slot_Dhl[sb_slot_AX1] );
-  wire sb_rs0_BX1_byp_Dhl = rs0_en_Dhl && ( rs0_addr_Dhl != 5'd0 ) && sb_valid_slot_Dhl[sb_slot_BX1] && ( rs0_addr_Dhl == sb_dest_slot_Dhl[sb_slot_BX1] );
-  wire sb_rs0_AX2_byp_Dhl = rs0_en_Dhl && ( rs0_addr_Dhl != 5'd0 ) && sb_valid_slot_Dhl[sb_slot_AX2] && ( rs0_addr_Dhl == sb_dest_slot_Dhl[sb_slot_AX2] );
-  wire sb_rs0_BX2_byp_Dhl = rs0_en_Dhl && ( rs0_addr_Dhl != 5'd0 ) && sb_valid_slot_Dhl[sb_slot_BX2] && ( rs0_addr_Dhl == sb_dest_slot_Dhl[sb_slot_BX2] );
-  wire sb_rs0_AX3_byp_Dhl = rs0_en_Dhl && ( rs0_addr_Dhl != 5'd0 ) && sb_valid_slot_Dhl[sb_slot_AX3] && ( rs0_addr_Dhl == sb_dest_slot_Dhl[sb_slot_AX3] );
-  wire sb_rs0_BX3_byp_Dhl = rs0_en_Dhl && ( rs0_addr_Dhl != 5'd0 ) && sb_valid_slot_Dhl[sb_slot_BX3] && ( rs0_addr_Dhl == sb_dest_slot_Dhl[sb_slot_BX3] );
-  wire sb_rs0_AW_byp_Dhl  = rs0_en_Dhl && ( rs0_addr_Dhl != 5'd0 ) && sb_valid_slot_Dhl[sb_slot_AW]  && ( rs0_addr_Dhl == sb_dest_slot_Dhl[sb_slot_AW] );
-  wire sb_rs0_BW_byp_Dhl  = rs0_en_Dhl && ( rs0_addr_Dhl != 5'd0 ) && sb_valid_slot_Dhl[sb_slot_BW]  && ( rs0_addr_Dhl == sb_dest_slot_Dhl[sb_slot_BW] );
-
-  wire sb_rt0_AX0_byp_Dhl = rt0_en_Dhl && ( rt0_addr_Dhl != 5'd0 ) && sb_valid_slot_Dhl[sb_slot_AX0] && ( rt0_addr_Dhl == sb_dest_slot_Dhl[sb_slot_AX0] );
-  wire sb_rt0_BX0_byp_Dhl = rt0_en_Dhl && ( rt0_addr_Dhl != 5'd0 ) && sb_valid_slot_Dhl[sb_slot_BX0] && ( rt0_addr_Dhl == sb_dest_slot_Dhl[sb_slot_BX0] );
-  wire sb_rt0_AX1_byp_Dhl = rt0_en_Dhl && ( rt0_addr_Dhl != 5'd0 ) && sb_valid_slot_Dhl[sb_slot_AX1] && ( rt0_addr_Dhl == sb_dest_slot_Dhl[sb_slot_AX1] );
-  wire sb_rt0_BX1_byp_Dhl = rt0_en_Dhl && ( rt0_addr_Dhl != 5'd0 ) && sb_valid_slot_Dhl[sb_slot_BX1] && ( rt0_addr_Dhl == sb_dest_slot_Dhl[sb_slot_BX1] );
-  wire sb_rt0_AX2_byp_Dhl = rt0_en_Dhl && ( rt0_addr_Dhl != 5'd0 ) && sb_valid_slot_Dhl[sb_slot_AX2] && ( rt0_addr_Dhl == sb_dest_slot_Dhl[sb_slot_AX2] );
-  wire sb_rt0_BX2_byp_Dhl = rt0_en_Dhl && ( rt0_addr_Dhl != 5'd0 ) && sb_valid_slot_Dhl[sb_slot_BX2] && ( rt0_addr_Dhl == sb_dest_slot_Dhl[sb_slot_BX2] );
-  wire sb_rt0_AX3_byp_Dhl = rt0_en_Dhl && ( rt0_addr_Dhl != 5'd0 ) && sb_valid_slot_Dhl[sb_slot_AX3] && ( rt0_addr_Dhl == sb_dest_slot_Dhl[sb_slot_AX3] );
-  wire sb_rt0_BX3_byp_Dhl = rt0_en_Dhl && ( rt0_addr_Dhl != 5'd0 ) && sb_valid_slot_Dhl[sb_slot_BX3] && ( rt0_addr_Dhl == sb_dest_slot_Dhl[sb_slot_BX3] );
-  wire sb_rt0_AW_byp_Dhl  = rt0_en_Dhl && ( rt0_addr_Dhl != 5'd0 ) && sb_valid_slot_Dhl[sb_slot_AW]  && ( rt0_addr_Dhl == sb_dest_slot_Dhl[sb_slot_AW] );
-  wire sb_rt0_BW_byp_Dhl  = rt0_en_Dhl && ( rt0_addr_Dhl != 5'd0 ) && sb_valid_slot_Dhl[sb_slot_BW]  && ( rt0_addr_Dhl == sb_dest_slot_Dhl[sb_slot_BW] );
-
-  wire sb_rs1_AX0_byp_Dhl = rs1_en_Dhl && ( rs1_addr_Dhl != 5'd0 ) && sb_valid_slot_Dhl[sb_slot_AX0] && ( rs1_addr_Dhl == sb_dest_slot_Dhl[sb_slot_AX0] );
-  wire sb_rs1_BX0_byp_Dhl = rs1_en_Dhl && ( rs1_addr_Dhl != 5'd0 ) && sb_valid_slot_Dhl[sb_slot_BX0] && ( rs1_addr_Dhl == sb_dest_slot_Dhl[sb_slot_BX0] );
-  wire sb_rs1_AX1_byp_Dhl = rs1_en_Dhl && ( rs1_addr_Dhl != 5'd0 ) && sb_valid_slot_Dhl[sb_slot_AX1] && ( rs1_addr_Dhl == sb_dest_slot_Dhl[sb_slot_AX1] );
-  wire sb_rs1_BX1_byp_Dhl = rs1_en_Dhl && ( rs1_addr_Dhl != 5'd0 ) && sb_valid_slot_Dhl[sb_slot_BX1] && ( rs1_addr_Dhl == sb_dest_slot_Dhl[sb_slot_BX1] );
-  wire sb_rs1_AX2_byp_Dhl = rs1_en_Dhl && ( rs1_addr_Dhl != 5'd0 ) && sb_valid_slot_Dhl[sb_slot_AX2] && ( rs1_addr_Dhl == sb_dest_slot_Dhl[sb_slot_AX2] );
-  wire sb_rs1_BX2_byp_Dhl = rs1_en_Dhl && ( rs1_addr_Dhl != 5'd0 ) && sb_valid_slot_Dhl[sb_slot_BX2] && ( rs1_addr_Dhl == sb_dest_slot_Dhl[sb_slot_BX2] );
-  wire sb_rs1_AX3_byp_Dhl = rs1_en_Dhl && ( rs1_addr_Dhl != 5'd0 ) && sb_valid_slot_Dhl[sb_slot_AX3] && ( rs1_addr_Dhl == sb_dest_slot_Dhl[sb_slot_AX3] );
-  wire sb_rs1_BX3_byp_Dhl = rs1_en_Dhl && ( rs1_addr_Dhl != 5'd0 ) && sb_valid_slot_Dhl[sb_slot_BX3] && ( rs1_addr_Dhl == sb_dest_slot_Dhl[sb_slot_BX3] );
-  wire sb_rs1_AW_byp_Dhl  = rs1_en_Dhl && ( rs1_addr_Dhl != 5'd0 ) && sb_valid_slot_Dhl[sb_slot_AW]  && ( rs1_addr_Dhl == sb_dest_slot_Dhl[sb_slot_AW] );
-  wire sb_rs1_BW_byp_Dhl  = rs1_en_Dhl && ( rs1_addr_Dhl != 5'd0 ) && sb_valid_slot_Dhl[sb_slot_BW]  && ( rs1_addr_Dhl == sb_dest_slot_Dhl[sb_slot_BW] );
-
-  wire sb_rt1_AX0_byp_Dhl = rt1_en_Dhl && ( rt1_addr_Dhl != 5'd0 ) && sb_valid_slot_Dhl[sb_slot_AX0] && ( rt1_addr_Dhl == sb_dest_slot_Dhl[sb_slot_AX0] );
-  wire sb_rt1_BX0_byp_Dhl = rt1_en_Dhl && ( rt1_addr_Dhl != 5'd0 ) && sb_valid_slot_Dhl[sb_slot_BX0] && ( rt1_addr_Dhl == sb_dest_slot_Dhl[sb_slot_BX0] );
-  wire sb_rt1_AX1_byp_Dhl = rt1_en_Dhl && ( rt1_addr_Dhl != 5'd0 ) && sb_valid_slot_Dhl[sb_slot_AX1] && ( rt1_addr_Dhl == sb_dest_slot_Dhl[sb_slot_AX1] );
-  wire sb_rt1_BX1_byp_Dhl = rt1_en_Dhl && ( rt1_addr_Dhl != 5'd0 ) && sb_valid_slot_Dhl[sb_slot_BX1] && ( rt1_addr_Dhl == sb_dest_slot_Dhl[sb_slot_BX1] );
-  wire sb_rt1_AX2_byp_Dhl = rt1_en_Dhl && ( rt1_addr_Dhl != 5'd0 ) && sb_valid_slot_Dhl[sb_slot_AX2] && ( rt1_addr_Dhl == sb_dest_slot_Dhl[sb_slot_AX2] );
-  wire sb_rt1_BX2_byp_Dhl = rt1_en_Dhl && ( rt1_addr_Dhl != 5'd0 ) && sb_valid_slot_Dhl[sb_slot_BX2] && ( rt1_addr_Dhl == sb_dest_slot_Dhl[sb_slot_BX2] );
-  wire sb_rt1_AX3_byp_Dhl = rt1_en_Dhl && ( rt1_addr_Dhl != 5'd0 ) && sb_valid_slot_Dhl[sb_slot_AX3] && ( rt1_addr_Dhl == sb_dest_slot_Dhl[sb_slot_AX3] );
-  wire sb_rt1_BX3_byp_Dhl = rt1_en_Dhl && ( rt1_addr_Dhl != 5'd0 ) && sb_valid_slot_Dhl[sb_slot_BX3] && ( rt1_addr_Dhl == sb_dest_slot_Dhl[sb_slot_BX3] );
-  wire sb_rt1_AW_byp_Dhl  = rt1_en_Dhl && ( rt1_addr_Dhl != 5'd0 ) && sb_valid_slot_Dhl[sb_slot_AW]  && ( rt1_addr_Dhl == sb_dest_slot_Dhl[sb_slot_AW] );
-  wire sb_rt1_BW_byp_Dhl  = rt1_en_Dhl && ( rt1_addr_Dhl != 5'd0 ) && sb_valid_slot_Dhl[sb_slot_BW]  && ( rt1_addr_Dhl == sb_dest_slot_Dhl[sb_slot_BW] );
-
-  wire [3:0] sb_opA0_byp_mux_sel_Dhl
-    = (sb_rs0_AX0_byp_Dhl) ? am_AX0_byp
-    : (sb_rs0_BX0_byp_Dhl) ? am_BX0_byp
-    : (sb_rs0_AX1_byp_Dhl) ? am_AX1_byp
-    : (sb_rs0_BX1_byp_Dhl) ? am_BX1_byp
-    : (sb_rs0_AX2_byp_Dhl) ? am_AX2_byp
-    : (sb_rs0_BX2_byp_Dhl) ? am_BX2_byp
-    : (sb_rs0_AX3_byp_Dhl) ? am_AX3_byp
-    : (sb_rs0_BX3_byp_Dhl) ? am_BX3_byp
-    : (sb_rs0_AW_byp_Dhl)  ? am_AW_byp
-    : (sb_rs0_BW_byp_Dhl)  ? am_BW_byp
-    :                        am_r0;
-
-  wire [3:0] sb_opA1_byp_mux_sel_Dhl
-    = (sb_rt0_AX0_byp_Dhl) ? bm_AX0_byp
-    : (sb_rt0_BX0_byp_Dhl) ? bm_BX0_byp
-    : (sb_rt0_AX1_byp_Dhl) ? bm_AX1_byp
-    : (sb_rt0_BX1_byp_Dhl) ? bm_BX1_byp
-    : (sb_rt0_AX2_byp_Dhl) ? bm_AX2_byp
-    : (sb_rt0_BX2_byp_Dhl) ? bm_BX2_byp
-    : (sb_rt0_AX3_byp_Dhl) ? bm_AX3_byp
-    : (sb_rt0_BX3_byp_Dhl) ? bm_BX3_byp
-    : (sb_rt0_AW_byp_Dhl)  ? bm_AW_byp
-    : (sb_rt0_BW_byp_Dhl)  ? bm_BW_byp
-    :                        bm_r1;
-
-  wire [3:0] sb_opB0_byp_mux_sel_Dhl
-    = (sb_rs1_AX0_byp_Dhl) ? am_AX0_byp
-    : (sb_rs1_BX0_byp_Dhl) ? am_BX0_byp
-    : (sb_rs1_AX1_byp_Dhl) ? am_AX1_byp
-    : (sb_rs1_BX1_byp_Dhl) ? am_BX1_byp
-    : (sb_rs1_AX2_byp_Dhl) ? am_AX2_byp
-    : (sb_rs1_BX2_byp_Dhl) ? am_BX2_byp
-    : (sb_rs1_AX3_byp_Dhl) ? am_AX3_byp
-    : (sb_rs1_BX3_byp_Dhl) ? am_BX3_byp
-    : (sb_rs1_AW_byp_Dhl)  ? am_AW_byp
-    : (sb_rs1_BW_byp_Dhl)  ? am_BW_byp
-    :                        am_r0;
-
-  wire [3:0] sb_opB1_byp_mux_sel_Dhl
-    = (sb_rt1_AX0_byp_Dhl) ? bm_AX0_byp
-    : (sb_rt1_BX0_byp_Dhl) ? bm_BX0_byp
-    : (sb_rt1_AX1_byp_Dhl) ? bm_AX1_byp
-    : (sb_rt1_BX1_byp_Dhl) ? bm_BX1_byp
-    : (sb_rt1_AX2_byp_Dhl) ? bm_AX2_byp
-    : (sb_rt1_BX2_byp_Dhl) ? bm_BX2_byp
-    : (sb_rt1_AX3_byp_Dhl) ? bm_AX3_byp
-    : (sb_rt1_BX3_byp_Dhl) ? bm_BX3_byp
-    : (sb_rt1_AW_byp_Dhl)  ? bm_AW_byp
-    : (sb_rt1_BW_byp_Dhl)  ? bm_BW_byp
-    :                        bm_r1;
-
-  // For Part 2 and Optionaly Part 1, replace the following control logic with a scoreboard
-
-  wire       rs0_AX0_byp_Dhl = rs0_en_Dhl
-                         && rfA_wen_X0hl
-                         && (rs0_addr_Dhl == rfA_waddr_X0hl)
-                         && !(rfA_waddr_X0hl == 5'd0)
-                         && inst_val_X0hl;
-
-  wire       rs0_AX1_byp_Dhl = rs0_en_Dhl
-                         && rfA_wen_X1hl
-                         && (rs0_addr_Dhl == rfA_waddr_X1hl)
-                         && !(rfA_waddr_X1hl == 5'd0)
-                         && inst_val_X1hl;
-
-  wire       rs0_AX2_byp_Dhl = rs0_en_Dhl
-                         && rfA_wen_X2hl
-                         && (rs0_addr_Dhl == rfA_waddr_X2hl)
-                         && !(rfA_waddr_X2hl == 5'd0)
-                         && inst_val_X2hl;
-
-  wire       rs0_AX3_byp_Dhl = rs0_en_Dhl
-                         && rfA_wen_X3hl
-                         && (rs0_addr_Dhl == rfA_waddr_X3hl)
-                         && !(rfA_waddr_X3hl == 5'd0)
-                         && inst_val_X3hl;
-
-  wire       rs0_AW_byp_Dhl = rs0_en_Dhl
-                         && rfA_wen_Whl
-                         && (rs0_addr_Dhl == rfA_waddr_Whl)
-                         && !(rfA_waddr_Whl == 5'd0)
-                         && inst_val_Whl;
-
-  wire       rt0_AX0_byp_Dhl = rt0_en_Dhl
-                         && rfA_wen_X0hl
-                         && (rt0_addr_Dhl == rfA_waddr_X0hl)
-                         && !(rfA_waddr_X0hl == 5'd0)
-                         && inst_val_X0hl;
-
-  wire       rt0_AX1_byp_Dhl = rt0_en_Dhl
-                         && rfA_wen_X1hl
-                         && (rt0_addr_Dhl == rfA_waddr_X1hl)
-                         && !(rfA_waddr_X1hl == 5'd0)
-                         && inst_val_X1hl;
-
-  wire       rt0_AX2_byp_Dhl = rt0_en_Dhl
-                         && rfA_wen_X2hl
-                         && (rt0_addr_Dhl == rfA_waddr_X2hl)
-                         && !(rfA_waddr_X2hl == 5'd0)
-                         && inst_val_X2hl;
-
-  wire       rt0_AX3_byp_Dhl = rt0_en_Dhl
-                         && rfA_wen_X3hl
-                         && (rt0_addr_Dhl == rfA_waddr_X3hl)
-                         && !(rfA_waddr_X3hl == 5'd0)
-                         && inst_val_X3hl;
-
-  wire       rt0_AW_byp_Dhl = rt0_en_Dhl
-                         && rfA_wen_Whl
-                         && (rt0_addr_Dhl == rfA_waddr_Whl)
-                         && !(rfA_waddr_Whl == 5'd0)
-                         && inst_val_Whl;
-
-  wire       rs1_AX0_byp_Dhl = rs1_en_Dhl
-                         && rfA_wen_X0hl
-                         && (rs1_addr_Dhl == rfA_waddr_X0hl)
-                         && !(rfA_waddr_X0hl == 5'd0)
-                         && inst_val_X0hl;
-
-  wire       rs1_AX1_byp_Dhl = rs1_en_Dhl
-                         && rfA_wen_X1hl
-                         && (rs1_addr_Dhl == rfA_waddr_X1hl)
-                         && !(rfA_waddr_X1hl == 5'd0)
-                         && inst_val_X1hl;
-
-  wire       rs1_AX2_byp_Dhl = rs1_en_Dhl
-                         && rfA_wen_X2hl
-                         && (rs1_addr_Dhl == rfA_waddr_X2hl)
-                         && !(rfA_waddr_X2hl == 5'd0)
-                         && inst_val_X2hl;
-
-  wire       rs1_AX3_byp_Dhl = rs1_en_Dhl
-                         && rfA_wen_X3hl
-                         && (rs1_addr_Dhl == rfA_waddr_X3hl)
-                         && !(rfA_waddr_X3hl == 5'd0)
-                         && inst_val_X3hl;
-
-  wire       rs1_AW_byp_Dhl = rs1_en_Dhl
-                         && rfA_wen_Whl
-                         && (rs1_addr_Dhl == rfA_waddr_Whl)
-                         && !(rfA_waddr_Whl == 5'd0)
-                         && inst_val_Whl;
-
-  wire       rt1_AX0_byp_Dhl = rt1_en_Dhl
-                         && rfA_wen_X0hl
-                         && (rt1_addr_Dhl == rfA_waddr_X0hl)
-                         && !(rfA_waddr_X0hl == 5'd0)
-                         && inst_val_X0hl;
-
-  wire       rt1_AX1_byp_Dhl = rt1_en_Dhl
-                         && rfA_wen_X1hl
-                         && (rt1_addr_Dhl == rfA_waddr_X1hl)
-                         && !(rfA_waddr_X1hl == 5'd0)
-                         && inst_val_X1hl;
-
-  wire       rt1_AX2_byp_Dhl = rt1_en_Dhl
-                         && rfA_wen_X2hl
-                         && (rt1_addr_Dhl == rfA_waddr_X2hl)
-                         && !(rfA_waddr_X2hl == 5'd0)
-                         && inst_val_X2hl;
-
-  wire       rt1_AX3_byp_Dhl = rt1_en_Dhl
-                         && rfA_wen_X3hl
-                         && (rt1_addr_Dhl == rfA_waddr_X3hl)
-                         && !(rfA_waddr_X3hl == 5'd0)
-                         && inst_val_X3hl;
-
-  wire       rt1_AW_byp_Dhl = rt1_en_Dhl
-                         && rfA_wen_Whl
-                         && (rt1_addr_Dhl == rfA_waddr_Whl)
-                         && !(rfA_waddr_Whl == 5'd0)
-                         && inst_val_Whl;
-
-  wire rs0_BX0_byp_Dhl = rs0_en_Dhl && rfB_wen_X0hl && (rs0_addr_Dhl == rfB_waddr_X0hl) && (rfB_waddr_X0hl != 5'd0) && inst_val_X0hl;
-  wire rs0_BX1_byp_Dhl = rs0_en_Dhl && rfB_wen_X1hl && (rs0_addr_Dhl == rfB_waddr_X1hl) && (rfB_waddr_X1hl != 5'd0) && inst_val_X1hl;
-  wire rs0_BX2_byp_Dhl = rs0_en_Dhl && rfB_wen_X2hl && (rs0_addr_Dhl == rfB_waddr_X2hl) && (rfB_waddr_X2hl != 5'd0) && inst_val_X2hl;
-  wire rs0_BX3_byp_Dhl = rs0_en_Dhl && rfB_wen_X3hl && (rs0_addr_Dhl == rfB_waddr_X3hl) && (rfB_waddr_X3hl != 5'd0) && inst_val_X3hl;
-  wire rs0_BW_byp_Dhl  = rs0_en_Dhl && rf1_wen_Whl  && (rs0_addr_Dhl == rf1_waddr_Whl)  && (rf1_waddr_Whl  != 5'd0) && inst_val_Whl;
-
-  wire rt0_BX0_byp_Dhl = rt0_en_Dhl && rfB_wen_X0hl && (rt0_addr_Dhl == rfB_waddr_X0hl) && (rfB_waddr_X0hl != 5'd0) && inst_val_X0hl;
-  wire rt0_BX1_byp_Dhl = rt0_en_Dhl && rfB_wen_X1hl && (rt0_addr_Dhl == rfB_waddr_X1hl) && (rfB_waddr_X1hl != 5'd0) && inst_val_X1hl;
-  wire rt0_BX2_byp_Dhl = rt0_en_Dhl && rfB_wen_X2hl && (rt0_addr_Dhl == rfB_waddr_X2hl) && (rfB_waddr_X2hl != 5'd0) && inst_val_X2hl;
-  wire rt0_BX3_byp_Dhl = rt0_en_Dhl && rfB_wen_X3hl && (rt0_addr_Dhl == rfB_waddr_X3hl) && (rfB_waddr_X3hl != 5'd0) && inst_val_X3hl;
-  wire rt0_BW_byp_Dhl  = rt0_en_Dhl && rf1_wen_Whl  && (rt0_addr_Dhl == rf1_waddr_Whl)  && (rf1_waddr_Whl  != 5'd0) && inst_val_Whl;
-
-  wire rs1_BX0_byp_Dhl = rs1_en_Dhl && rfB_wen_X0hl && (rs1_addr_Dhl == rfB_waddr_X0hl) && (rfB_waddr_X0hl != 5'd0) && inst_val_X0hl;
-  wire rs1_BX1_byp_Dhl = rs1_en_Dhl && rfB_wen_X1hl && (rs1_addr_Dhl == rfB_waddr_X1hl) && (rfB_waddr_X1hl != 5'd0) && inst_val_X1hl;
-  wire rs1_BX2_byp_Dhl = rs1_en_Dhl && rfB_wen_X2hl && (rs1_addr_Dhl == rfB_waddr_X2hl) && (rfB_waddr_X2hl != 5'd0) && inst_val_X2hl;
-  wire rs1_BX3_byp_Dhl = rs1_en_Dhl && rfB_wen_X3hl && (rs1_addr_Dhl == rfB_waddr_X3hl) && (rfB_waddr_X3hl != 5'd0) && inst_val_X3hl;
-  wire rs1_BW_byp_Dhl  = rs1_en_Dhl && rf1_wen_Whl  && (rs1_addr_Dhl == rf1_waddr_Whl)  && (rf1_waddr_Whl  != 5'd0) && inst_val_Whl;
-
-  wire rt1_BX0_byp_Dhl = rt1_en_Dhl && rfB_wen_X0hl && (rt1_addr_Dhl == rfB_waddr_X0hl) && (rfB_waddr_X0hl != 5'd0) && inst_val_X0hl;
-  wire rt1_BX1_byp_Dhl = rt1_en_Dhl && rfB_wen_X1hl && (rt1_addr_Dhl == rfB_waddr_X1hl) && (rfB_waddr_X1hl != 5'd0) && inst_val_X1hl;
-  wire rt1_BX2_byp_Dhl = rt1_en_Dhl && rfB_wen_X2hl && (rt1_addr_Dhl == rfB_waddr_X2hl) && (rfB_waddr_X2hl != 5'd0) && inst_val_X2hl;
-  wire rt1_BX3_byp_Dhl = rt1_en_Dhl && rfB_wen_X3hl && (rt1_addr_Dhl == rfB_waddr_X3hl) && (rfB_waddr_X3hl != 5'd0) && inst_val_X3hl;
-  wire rt1_BW_byp_Dhl  = rt1_en_Dhl && rf1_wen_Whl  && (rt1_addr_Dhl == rf1_waddr_Whl)  && (rf1_waddr_Whl  != 5'd0) && inst_val_Whl;
+  
 
 
   // Operand Bypass Mux Select
 
-  assign opA0_byp_mux_sel_Dhl = sb_opA0_byp_mux_sel_Dhl;
-  assign opA1_byp_mux_sel_Dhl = sb_opA1_byp_mux_sel_Dhl;
-  assign opB0_byp_mux_sel_Dhl = sb_opB0_byp_mux_sel_Dhl;
-  assign opB1_byp_mux_sel_Dhl = sb_opB1_byp_mux_sel_Dhl;
+  // Scoreboard-driven bypass select uses the same-cycle live arch-reg-indexed sb view
+  // intentionally excludes newly issuing D-stage producers, so decode only sees already in-flight writers here
+
+  wire [3:0] sb_live_opA0_byp_mux_sel_Dhl
+    = !sb_live_rs0_pending_Dhl                         ? am_r0
+    : !sb_live_rs0_pipe_Dhl
+     && ( sb_live_rs0_stage_Dhl == sb_stage_x0 ) ? am_AX0_byp
+    :  sb_live_rs0_pipe_Dhl
+     && ( sb_live_rs0_stage_Dhl == sb_stage_x0 ) ? am_BX0_byp
+    : !sb_live_rs0_pipe_Dhl
+     && ( sb_live_rs0_stage_Dhl == sb_stage_x1 ) ? am_AX1_byp
+    :  sb_live_rs0_pipe_Dhl
+     && ( sb_live_rs0_stage_Dhl == sb_stage_x1 ) ? am_BX1_byp
+    : !sb_live_rs0_pipe_Dhl
+     && ( sb_live_rs0_stage_Dhl == sb_stage_x2 ) ? am_AX2_byp
+    :  sb_live_rs0_pipe_Dhl
+     && ( sb_live_rs0_stage_Dhl == sb_stage_x2 ) ? am_BX2_byp
+    : !sb_live_rs0_pipe_Dhl
+     && ( sb_live_rs0_stage_Dhl == sb_stage_x3 ) ? am_AX3_byp
+    :  sb_live_rs0_pipe_Dhl
+     && ( sb_live_rs0_stage_Dhl == sb_stage_x3 ) ? am_BX3_byp
+    : !sb_live_rs0_pipe_Dhl
+     && ( sb_live_rs0_stage_Dhl == sb_stage_w  ) ? am_AW_byp
+    :  sb_live_rs0_pipe_Dhl
+     && ( sb_live_rs0_stage_Dhl == sb_stage_w  ) ? am_BW_byp
+    :                                                    am_r0;
+
+  wire [3:0] sb_live_opA1_byp_mux_sel_Dhl
+    = !sb_live_rt0_pending_Dhl                         ? bm_r1
+    : !sb_live_rt0_pipe_Dhl
+     && ( sb_live_rt0_stage_Dhl == sb_stage_x0 ) ? bm_AX0_byp
+    :  sb_live_rt0_pipe_Dhl
+     && ( sb_live_rt0_stage_Dhl == sb_stage_x0 ) ? bm_BX0_byp
+    : !sb_live_rt0_pipe_Dhl
+     && ( sb_live_rt0_stage_Dhl == sb_stage_x1 ) ? bm_AX1_byp
+    :  sb_live_rt0_pipe_Dhl
+     && ( sb_live_rt0_stage_Dhl == sb_stage_x1 ) ? bm_BX1_byp
+    : !sb_live_rt0_pipe_Dhl
+     && ( sb_live_rt0_stage_Dhl == sb_stage_x2 ) ? bm_AX2_byp
+    :  sb_live_rt0_pipe_Dhl
+     && ( sb_live_rt0_stage_Dhl == sb_stage_x2 ) ? bm_BX2_byp
+    : !sb_live_rt0_pipe_Dhl
+     && ( sb_live_rt0_stage_Dhl == sb_stage_x3 ) ? bm_AX3_byp
+    :  sb_live_rt0_pipe_Dhl
+     && ( sb_live_rt0_stage_Dhl == sb_stage_x3 ) ? bm_BX3_byp
+    : !sb_live_rt0_pipe_Dhl
+     && ( sb_live_rt0_stage_Dhl == sb_stage_w  ) ? bm_AW_byp
+    :  sb_live_rt0_pipe_Dhl
+     && ( sb_live_rt0_stage_Dhl == sb_stage_w  ) ? bm_BW_byp
+    :                                                    bm_r1;
+
+  wire [3:0] sb_live_opB0_byp_mux_sel_Dhl
+    = !sb_live_rs1_pending_Dhl                         ? am_r0
+    : !sb_live_rs1_pipe_Dhl
+     && ( sb_live_rs1_stage_Dhl == sb_stage_x0 ) ? am_AX0_byp
+    :  sb_live_rs1_pipe_Dhl
+     && ( sb_live_rs1_stage_Dhl == sb_stage_x0 ) ? am_BX0_byp
+    : !sb_live_rs1_pipe_Dhl
+     && ( sb_live_rs1_stage_Dhl == sb_stage_x1 ) ? am_AX1_byp
+    :  sb_live_rs1_pipe_Dhl
+     && ( sb_live_rs1_stage_Dhl == sb_stage_x1 ) ? am_BX1_byp
+    : !sb_live_rs1_pipe_Dhl
+     && ( sb_live_rs1_stage_Dhl == sb_stage_x2 ) ? am_AX2_byp
+    :  sb_live_rs1_pipe_Dhl
+     && ( sb_live_rs1_stage_Dhl == sb_stage_x2 ) ? am_BX2_byp
+    : !sb_live_rs1_pipe_Dhl
+     && ( sb_live_rs1_stage_Dhl == sb_stage_x3 ) ? am_AX3_byp
+    :  sb_live_rs1_pipe_Dhl
+     && ( sb_live_rs1_stage_Dhl == sb_stage_x3 ) ? am_BX3_byp
+    : !sb_live_rs1_pipe_Dhl
+     && ( sb_live_rs1_stage_Dhl == sb_stage_w  ) ? am_AW_byp
+    :  sb_live_rs1_pipe_Dhl
+     && ( sb_live_rs1_stage_Dhl == sb_stage_w  ) ? am_BW_byp
+    :                                                    am_r0;
+
+  wire [3:0] sb_live_opB1_byp_mux_sel_Dhl
+    = !sb_live_rt1_pending_Dhl                         ? bm_r1
+    : !sb_live_rt1_pipe_Dhl
+     && ( sb_live_rt1_stage_Dhl == sb_stage_x0 ) ? bm_AX0_byp
+    :  sb_live_rt1_pipe_Dhl
+     && ( sb_live_rt1_stage_Dhl == sb_stage_x0 ) ? bm_BX0_byp
+    : !sb_live_rt1_pipe_Dhl
+     && ( sb_live_rt1_stage_Dhl == sb_stage_x1 ) ? bm_AX1_byp
+    :  sb_live_rt1_pipe_Dhl
+     && ( sb_live_rt1_stage_Dhl == sb_stage_x1 ) ? bm_BX1_byp
+    : !sb_live_rt1_pipe_Dhl
+     && ( sb_live_rt1_stage_Dhl == sb_stage_x2 ) ? bm_AX2_byp
+    :  sb_live_rt1_pipe_Dhl
+     && ( sb_live_rt1_stage_Dhl == sb_stage_x2 ) ? bm_BX2_byp
+    : !sb_live_rt1_pipe_Dhl
+     && ( sb_live_rt1_stage_Dhl == sb_stage_x3 ) ? bm_AX3_byp
+    :  sb_live_rt1_pipe_Dhl
+     && ( sb_live_rt1_stage_Dhl == sb_stage_x3 ) ? bm_BX3_byp
+    : !sb_live_rt1_pipe_Dhl
+     && ( sb_live_rt1_stage_Dhl == sb_stage_w  ) ? bm_AW_byp
+    :  sb_live_rt1_pipe_Dhl
+     && ( sb_live_rt1_stage_Dhl == sb_stage_w  ) ? bm_BW_byp
+    :                                                    bm_r1;
+
+  assign opA0_byp_mux_sel_Dhl = sb_live_opA0_byp_mux_sel_Dhl;
+  assign opA1_byp_mux_sel_Dhl = sb_live_opA1_byp_mux_sel_Dhl;
+  assign opB0_byp_mux_sel_Dhl = sb_live_opB0_byp_mux_sel_Dhl;
+  assign opB1_byp_mux_sel_Dhl = sb_live_opB1_byp_mux_sel_Dhl;
 
   // Operand Mux Select
 
@@ -1145,55 +1011,75 @@ module parc_CoreCtrl
 
   wire squash_Dhl = ( inst_val_X0hl && brj_taken_X0hl );
 
-  // Scoreboard-derived decode stall leaves
+  // Scoreboard-derived readiness/stall view
+  // ALU results are bypassable from all tracked stages, load results are not ready in X0/X1, and mul/div results are not ready until W
 
-  wire sb_stall_0_muldiv_use_Dhl = inst_val_Dhl && (
-                              ( sb_rs0_AX0_byp_Dhl && is_muldiv_X0hl )
-                           || ( sb_rs0_AX1_byp_Dhl && is_muldiv_X1hl )
-                           || ( sb_rs0_AX2_byp_Dhl && is_muldiv_X2hl )
-                           || ( sb_rs0_AX3_byp_Dhl && is_muldiv_X3hl )
-                           || ( sb_rt0_AX0_byp_Dhl && is_muldiv_X0hl )
-                           || ( sb_rt0_AX1_byp_Dhl && is_muldiv_X1hl )
-                           || ( sb_rt0_AX2_byp_Dhl && is_muldiv_X2hl )
-                           || ( sb_rt0_AX3_byp_Dhl && is_muldiv_X3hl ));
+  wire sb_rs0_load_wait_Dhl = rs0_en_Dhl && sb_live_rs0_pending_Dhl
+                           && !sb_live_rs0_pipe_Dhl
+                           && ( sb_live_rs0_kind_Dhl  == sb_kind_load )
+                           && (   ( sb_live_rs0_stage_Dhl == sb_stage_x0 )
+                               || ( sb_live_rs0_stage_Dhl == sb_stage_x1 ) );
+  wire sb_rt0_load_wait_Dhl = rt0_en_Dhl && sb_live_rt0_pending_Dhl
+                           && !sb_live_rt0_pipe_Dhl
+                           && ( sb_live_rt0_kind_Dhl  == sb_kind_load )
+                           && (   ( sb_live_rt0_stage_Dhl == sb_stage_x0 )
+                               || ( sb_live_rt0_stage_Dhl == sb_stage_x1 ) );
+  wire sb_rs1_load_wait_Dhl = rs1_en_Dhl && sb_live_rs1_pending_Dhl
+                           && !sb_live_rs1_pipe_Dhl
+                           && ( sb_live_rs1_kind_Dhl  == sb_kind_load )
+                           && (   ( sb_live_rs1_stage_Dhl == sb_stage_x0 )
+                               || ( sb_live_rs1_stage_Dhl == sb_stage_x1 ) );
+  wire sb_rt1_load_wait_Dhl = rt1_en_Dhl && sb_live_rt1_pending_Dhl
+                           && !sb_live_rt1_pipe_Dhl
+                           && ( sb_live_rt1_kind_Dhl  == sb_kind_load )
+                           && (   ( sb_live_rt1_stage_Dhl == sb_stage_x0 )
+                               || ( sb_live_rt1_stage_Dhl == sb_stage_x1 ) );
 
-  wire sb_stall_1_muldiv_use_Dhl = inst_val_Dhl && (
-                              ( sb_rs1_AX0_byp_Dhl && is_muldiv_X0hl )
-                           || ( sb_rs1_AX1_byp_Dhl && is_muldiv_X1hl )
-                           || ( sb_rs1_AX2_byp_Dhl && is_muldiv_X2hl )
-                           || ( sb_rs1_AX3_byp_Dhl && is_muldiv_X3hl )
-                           || ( sb_rt1_AX0_byp_Dhl && is_muldiv_X0hl )
-                           || ( sb_rt1_AX1_byp_Dhl && is_muldiv_X1hl )
-                           || ( sb_rt1_AX2_byp_Dhl && is_muldiv_X2hl )
-                           || ( sb_rt1_AX3_byp_Dhl && is_muldiv_X3hl ));
+  wire sb_rs0_muldiv_wait_Dhl = rs0_en_Dhl && sb_live_rs0_pending_Dhl
+                             && !sb_live_rs0_pipe_Dhl
+                             && ( sb_live_rs0_kind_Dhl == sb_kind_muldiv )
+                             && ( sb_live_rs0_stage_Dhl != sb_stage_w );
+  wire sb_rt0_muldiv_wait_Dhl = rt0_en_Dhl && sb_live_rt0_pending_Dhl
+                             && !sb_live_rt0_pipe_Dhl
+                             && ( sb_live_rt0_kind_Dhl == sb_kind_muldiv )
+                             && ( sb_live_rt0_stage_Dhl != sb_stage_w );
+  wire sb_rs1_muldiv_wait_Dhl = rs1_en_Dhl && sb_live_rs1_pending_Dhl
+                             && !sb_live_rs1_pipe_Dhl
+                             && ( sb_live_rs1_kind_Dhl == sb_kind_muldiv )
+                             && ( sb_live_rs1_stage_Dhl != sb_stage_w );
+  wire sb_rt1_muldiv_wait_Dhl = rt1_en_Dhl && sb_live_rt1_pending_Dhl
+                             && !sb_live_rt1_pipe_Dhl
+                             && ( sb_live_rt1_kind_Dhl == sb_kind_muldiv )
+                             && ( sb_live_rt1_stage_Dhl != sb_stage_w );
 
-  wire sb_stall_0_load_use_Dhl = inst_val_Dhl && (
-                            ( sb_rs0_AX0_byp_Dhl && is_load_X0hl )
-                         || ( sb_rs0_AX1_byp_Dhl && is_load_X1hl )
-                         || ( sb_rt0_AX0_byp_Dhl && is_load_X0hl )
-                         || ( sb_rt0_AX1_byp_Dhl && is_load_X1hl ) );
+  wire sb_rs0_ready_Dhl = !sb_rs0_load_wait_Dhl && !sb_rs0_muldiv_wait_Dhl;
+  wire sb_rt0_ready_Dhl = !sb_rt0_load_wait_Dhl && !sb_rt0_muldiv_wait_Dhl;
+  wire sb_rs1_ready_Dhl = !sb_rs1_load_wait_Dhl && !sb_rs1_muldiv_wait_Dhl;
+  wire sb_rt1_ready_Dhl = !sb_rt1_load_wait_Dhl && !sb_rt1_muldiv_wait_Dhl;
 
-  wire sb_stall_1_load_use_Dhl = inst_val_Dhl && (
-                            ( sb_rs1_AX0_byp_Dhl && is_load_X0hl )
-                         || ( sb_rs1_AX1_byp_Dhl && is_load_X1hl )
-                         || ( sb_rt1_AX0_byp_Dhl && is_load_X0hl )
-                         || ( sb_rt1_AX1_byp_Dhl && is_load_X1hl ) );
+  wire sb_stall_0_load_use_Dhl   = inst_val_Dhl && ( sb_rs0_load_wait_Dhl   || sb_rt0_load_wait_Dhl );
+  wire sb_stall_1_load_use_Dhl   = inst_val_Dhl && ( sb_rs1_load_wait_Dhl   || sb_rt1_load_wait_Dhl );
+  wire sb_stall_0_muldiv_use_Dhl = inst_val_Dhl && ( sb_rs0_muldiv_wait_Dhl || sb_rt0_muldiv_wait_Dhl );
+  wire sb_stall_1_muldiv_use_Dhl = inst_val_Dhl && ( sb_rs1_muldiv_wait_Dhl || sb_rt1_muldiv_wait_Dhl );
 
-  wire stall_0_muldiv_use_Dhl = sb_stall_0_muldiv_use_Dhl;
-  wire stall_1_muldiv_use_Dhl = sb_stall_1_muldiv_use_Dhl;
-  wire stall_0_load_use_Dhl   = sb_stall_0_load_use_Dhl;
-  wire stall_1_load_use_Dhl   = sb_stall_1_load_use_Dhl;
+  wire sb_slot0_data_stall_Dhl = inst_val_Dhl && !( sb_rs0_ready_Dhl && sb_rt0_ready_Dhl );
+  wire sb_slot1_data_stall_Dhl = inst_val_Dhl && !( sb_rs1_ready_Dhl && sb_rt1_ready_Dhl );
+  wire sb_data_hazard_stall_Dhl
+    = ( sb_stall_0_muldiv_use_Dhl
+     || sb_stall_1_muldiv_use_Dhl
+     || sb_stall_0_load_use_Dhl
+     || sb_stall_1_load_use_Dhl );
 
   // Aggregate Stall Signal
 
   wire ir1_brj_taken_Dhl = (ir1_Dhl ==? `PARC_INST_MSG_JALR) && inst_val_Dhl;
 
-  // Real hazard stall -- does not include the narrow PC-context hold
+  // Real data-hazard stall now uses the scoreboard-derived stall leaves
   assign ostall_Dhl = ( stall_X0hl
-                     || stall_0_muldiv_use_Dhl
-                     || stall_1_muldiv_use_Dhl
-                     || stall_1_load_use_Dhl
-                     || stall_0_load_use_Dhl );
+                     || sb_stall_0_muldiv_use_Dhl
+                     || sb_stall_1_muldiv_use_Dhl
+                     || sb_stall_1_load_use_Dhl
+                     || sb_stall_0_load_use_Dhl );
 
   // Track whether the instruction that just entered X0 came from slot 1
   reg slot1_ctrl_in_flight;
@@ -1204,9 +1090,14 @@ module parc_CoreCtrl
       slot1_ctrl_in_flight <= (steering_mux_sel && !ready_for_next && !bubble_Dhl && cs1_is_ctrl_Dhl);
   end
 
-  // PC-context hold: when issuing slot 0 and slot 1 is control-flow, hold D so slot 1 can compute its branch/jump target with the right PC base
+  // PC-context hold: when issuing slot 0 and slot 1 is control-flow,
+  // hold D so slot 1 can compute its branch/jump target with the right PC base.
   wire [2:0] br_sel1_Dhl     = cs1[`PARC_INST_MSG_BR_SEL];
   wire       cs1_is_ctrl_Dhl = cs1[`PARC_INST_MSG_J_EN] || ( br_sel1_Dhl != br_none );
+  // wire       stall_pcctx_Dhl = !steering_mux_sel
+  //                           && !bubble_Dhl
+  //                           && !squash_Dhl
+  //                           && cs1_is_ctrl_Dhl;
   wire stall_pcctx_Dhl = ( steering_mux_sel && !ready_for_next && !bubble_Dhl && !squash_Dhl
                       && cs1_is_ctrl_Dhl )
                     || ( slot1_ctrl_in_flight
@@ -1297,7 +1188,7 @@ module parc_CoreCtrl
   wire inst_val_X0hl = ( !bubble_X0hl && !squash_X0hl );
 
   // Muldiv request
-  // Only launch a mul/div request when decode is actually advancing into X0
+
   wire muldiv_issue_X0_Dhl = muldivreq_val_Dhl && inst_val_Dhl && !stall_X0hl;
   assign muldivreq_val = muldiv_issue_X0_Dhl;
   assign muldivresp_rdy = 1'b1;
@@ -1373,6 +1264,8 @@ module parc_CoreCtrl
   reg        is_load_X1hl;
   reg        is_muldiv_X1hl;
   reg        dmemreq_val_X1hl;
+  //reg  [2:0] dmemresp_mux_sel_X1hl;
+  //reg        memex_mux_sel_X1hl;
   reg        execute_mux_sel_X1hl;
   reg        muldiv_mux_sel_X1hl;
   reg        rf0_wen_X1hl;
@@ -1457,6 +1350,7 @@ module parc_CoreCtrl
   reg [31:0] ir0_X2hl;
   reg [31:0] ir1_X2hl;
   reg        is_muldiv_X2hl;
+  //reg        dmemresp_queue_val_X1hl;
   reg        rf0_wen_X2hl;
   reg        rf1_wen_X2hl;
   reg  [4:0] rf0_waddr_X2hl;
@@ -1528,6 +1422,9 @@ module parc_CoreCtrl
   reg  [4:0] rf1_waddr_X3hl;
   reg        cp0_wen_X3hl;
   reg  [4:0] cp0_addr_X3hl;
+  //reg        execute_mux_sel_X3hl;
+  //reg        muldiv_mux_sel_X3hl;
+
   reg        bubble_X3hl;
 
   // Pipeline Controls
@@ -1629,6 +1526,139 @@ module parc_CoreCtrl
 
   wire squash_Whl = 1'b0;
   assign stall_Whl  = 1'b0;
+
+  //----------------------------------------------------------------------
+  // Same-Cycle Architectural Scoreboard View
+  //----------------------------------------------------------------------
+
+  // Same-cycle decode-visible architectural scoreboard view
+  // rebuilt combinationally from the current live pipeline state
+  reg       sb_live_pending    [0:31];
+  reg       sb_live_pipe       [0:31];
+  reg [2:0] sb_live_stage      [0:31];
+  reg [1:0] sb_live_kind       [0:31];
+
+  integer ghost_sb_idx;
+
+  wire ghost_sb_x0a_v = inst_val_X0hl && rfA_wen_X0hl && ( rfA_waddr_X0hl != 5'd0 );
+  wire ghost_sb_x0b_v = inst_val_X0hl && rfB_wen_X0hl && ( rfB_waddr_X0hl != 5'd0 );
+  wire ghost_sb_x1a_v = inst_val_X1hl && rfA_wen_X1hl && ( rfA_waddr_X1hl != 5'd0 );
+  wire ghost_sb_x1b_v = inst_val_X1hl && rfB_wen_X1hl && ( rfB_waddr_X1hl != 5'd0 );
+  wire ghost_sb_x2a_v = inst_val_X2hl && rfA_wen_X2hl && ( rfA_waddr_X2hl != 5'd0 );
+  wire ghost_sb_x2b_v = inst_val_X2hl && rfB_wen_X2hl && ( rfB_waddr_X2hl != 5'd0 );
+  wire ghost_sb_x3a_v = inst_val_X3hl && rfA_wen_X3hl && ( rfA_waddr_X3hl != 5'd0 );
+  wire ghost_sb_x3b_v = inst_val_X3hl && rfB_wen_X3hl && ( rfB_waddr_X3hl != 5'd0 );
+  wire ghost_sb_wa_v  = inst_val_Whl  && rfA_wen_Whl  && ( rfA_waddr_Whl  != 5'd0 );
+  wire ghost_sb_wb_v  = inst_val_Whl  && rfB_wen_Whl  && ( rfB_waddr_Whl  != 5'd0 );
+
+  wire [1:0] ghost_sb_x0a_kind = is_muldiv_X0hl ? sb_kind_muldiv
+                              : is_load_X0hl    ? sb_kind_load
+                              :                   sb_kind_alu;
+  wire [1:0] ghost_sb_x1a_kind = is_muldiv_X1hl ? sb_kind_muldiv
+                              : is_load_X1hl    ? sb_kind_load
+                              :                   sb_kind_alu;
+  wire [1:0] ghost_sb_x2a_kind = is_muldiv_X2hl ? sb_kind_muldiv
+                              :                   sb_kind_alu;
+  wire [1:0] ghost_sb_x3a_kind = is_muldiv_X3hl ? sb_kind_muldiv
+                              :                   sb_kind_alu;
+  wire [1:0] ghost_sb_wa_kind  = sb_kind_alu;
+
+  always @(*) begin
+    for ( ghost_sb_idx = 0; ghost_sb_idx < 32; ghost_sb_idx = ghost_sb_idx + 1 ) begin
+      sb_live_pending[ghost_sb_idx] = 1'b0;
+      sb_live_pipe[ghost_sb_idx]    = sb_pipe_a;
+      sb_live_stage[ghost_sb_idx]   = sb_stage_none;
+      sb_live_kind[ghost_sb_idx]    = sb_kind_none;
+    end
+
+    // Oldest-to-youngest overwrite order across the currently in-flight
+    // machine state: W -> X3 -> X2 -> X1 -> X0
+    if ( ghost_sb_wa_v ) begin
+      sb_live_pending[rfA_waddr_Whl] = 1'b1;
+      sb_live_pipe[rfA_waddr_Whl]    = sb_pipe_a;
+      sb_live_stage[rfA_waddr_Whl]   = sb_stage_w;
+      sb_live_kind[rfA_waddr_Whl]    = ghost_sb_wa_kind;
+    end
+    if ( ghost_sb_wb_v ) begin
+      sb_live_pending[rfB_waddr_Whl] = 1'b1;
+      sb_live_pipe[rfB_waddr_Whl]    = sb_pipe_b;
+      sb_live_stage[rfB_waddr_Whl]   = sb_stage_w;
+      sb_live_kind[rfB_waddr_Whl]    = sb_kind_alu;
+    end
+
+    if ( ghost_sb_x3a_v ) begin
+      sb_live_pending[rfA_waddr_X3hl] = 1'b1;
+      sb_live_pipe[rfA_waddr_X3hl]    = sb_pipe_a;
+      sb_live_stage[rfA_waddr_X3hl]   = sb_stage_x3;
+      sb_live_kind[rfA_waddr_X3hl]    = ghost_sb_x3a_kind;
+    end
+    if ( ghost_sb_x3b_v ) begin
+      sb_live_pending[rfB_waddr_X3hl] = 1'b1;
+      sb_live_pipe[rfB_waddr_X3hl]    = sb_pipe_b;
+      sb_live_stage[rfB_waddr_X3hl]   = sb_stage_x3;
+      sb_live_kind[rfB_waddr_X3hl]    = sb_kind_alu;
+    end
+
+    if ( ghost_sb_x2a_v ) begin
+      sb_live_pending[rfA_waddr_X2hl] = 1'b1;
+      sb_live_pipe[rfA_waddr_X2hl]    = sb_pipe_a;
+      sb_live_stage[rfA_waddr_X2hl]   = sb_stage_x2;
+      sb_live_kind[rfA_waddr_X2hl]    = ghost_sb_x2a_kind;
+    end
+    if ( ghost_sb_x2b_v ) begin
+      sb_live_pending[rfB_waddr_X2hl] = 1'b1;
+      sb_live_pipe[rfB_waddr_X2hl]    = sb_pipe_b;
+      sb_live_stage[rfB_waddr_X2hl]   = sb_stage_x2;
+      sb_live_kind[rfB_waddr_X2hl]    = sb_kind_alu;
+    end
+
+    if ( ghost_sb_x1a_v ) begin
+      sb_live_pending[rfA_waddr_X1hl] = 1'b1;
+      sb_live_pipe[rfA_waddr_X1hl]    = sb_pipe_a;
+      sb_live_stage[rfA_waddr_X1hl]   = sb_stage_x1;
+      sb_live_kind[rfA_waddr_X1hl]    = ghost_sb_x1a_kind;
+    end
+    if ( ghost_sb_x1b_v ) begin
+      sb_live_pending[rfB_waddr_X1hl] = 1'b1;
+      sb_live_pipe[rfB_waddr_X1hl]    = sb_pipe_b;
+      sb_live_stage[rfB_waddr_X1hl]   = sb_stage_x1;
+      sb_live_kind[rfB_waddr_X1hl]    = sb_kind_alu;
+    end
+
+    if ( ghost_sb_x0a_v ) begin
+      sb_live_pending[rfA_waddr_X0hl] = 1'b1;
+      sb_live_pipe[rfA_waddr_X0hl]    = sb_pipe_a;
+      sb_live_stage[rfA_waddr_X0hl]   = sb_stage_x0;
+      sb_live_kind[rfA_waddr_X0hl]    = ghost_sb_x0a_kind;
+    end
+    if ( ghost_sb_x0b_v ) begin
+      sb_live_pending[rfB_waddr_X0hl] = 1'b1;
+      sb_live_pipe[rfB_waddr_X0hl]    = sb_pipe_b;
+      sb_live_stage[rfB_waddr_X0hl]   = sb_stage_x0;
+      sb_live_kind[rfB_waddr_X0hl]    = sb_kind_alu;
+    end
+  end
+
+  // Decode-side live scoreboard taps read the same-cycle architectural view
+  wire       sb_live_rs0_pending_Dhl = rs0_en_Dhl && sb_live_pending[rs0_addr_Dhl];
+  wire       sb_live_rt0_pending_Dhl = rt0_en_Dhl && sb_live_pending[rt0_addr_Dhl];
+  wire       sb_live_rs1_pending_Dhl = rs1_en_Dhl && sb_live_pending[rs1_addr_Dhl];
+  wire       sb_live_rt1_pending_Dhl = rt1_en_Dhl && sb_live_pending[rt1_addr_Dhl];
+
+  wire       sb_live_rs0_pipe_Dhl    = sb_live_pipe[rs0_addr_Dhl];
+  wire       sb_live_rt0_pipe_Dhl    = sb_live_pipe[rt0_addr_Dhl];
+  wire       sb_live_rs1_pipe_Dhl    = sb_live_pipe[rs1_addr_Dhl];
+  wire       sb_live_rt1_pipe_Dhl    = sb_live_pipe[rt1_addr_Dhl];
+
+  wire [2:0] sb_live_rs0_stage_Dhl   = sb_live_stage[rs0_addr_Dhl];
+  wire [2:0] sb_live_rt0_stage_Dhl   = sb_live_stage[rt0_addr_Dhl];
+  wire [2:0] sb_live_rs1_stage_Dhl   = sb_live_stage[rs1_addr_Dhl];
+  wire [2:0] sb_live_rt1_stage_Dhl   = sb_live_stage[rt1_addr_Dhl];
+
+  wire [1:0] sb_live_rs0_kind_Dhl    = sb_live_kind[rs0_addr_Dhl];
+  wire [1:0] sb_live_rt0_kind_Dhl    = sb_live_kind[rt0_addr_Dhl];
+  wire [1:0] sb_live_rs1_kind_Dhl    = sb_live_kind[rs1_addr_Dhl];
+  wire [1:0] sb_live_rt1_kind_Dhl    = sb_live_kind[rt1_addr_Dhl];
 
   //----------------------------------------------------------------------
   // Debug registers for instruction disassembly
@@ -1760,6 +1790,7 @@ module parc_CoreCtrl
   `ifndef SYNTHESIS
 
   reg overload = 1'b0;
+
   always @ ( posedge clk ) begin
     if (( !pipeA_cs[`PARC_INST_MSG_INST_VAL] && !reset ) 
      || ( !cs1[`PARC_INST_MSG_INST_VAL] && !reset )) begin
@@ -1787,7 +1818,7 @@ module parc_CoreCtrl
   reg [31:0] num_inst    = 32'b0;
   reg [31:0] num_cycles  = 32'b0;
   reg        stats_en    = 1'b0; // Used for enabling stats on asm tests
-  wire       dual_issue_Dhl = inst_val_Dhl && steering_mux_sel && !need_stall;
+  wire       dual_issue_Dhl = inst_val_Dhl && steering_mux_sel && !serialize_slot1_Dhl;
 
   always @( posedge clk ) begin
     if ( !reset ) begin
