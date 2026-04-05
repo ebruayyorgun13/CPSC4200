@@ -1302,16 +1302,87 @@ module parc_CoreCtrl
                               && ( rt1_addr_Dhl == rfA_waddr_X1hl )
                               && ( rfA_waddr_X1hl != 5'd0 ) && is_load_X1hl ) );
 
+  // Shadow scoreboard-derived readiness/stall view
+  // this matches the current trusted behavior: ALU results are bypassable from all tracked stages, load results are not ready in X0/X1, and mul/div results are not ready until W
+
+  wire sb_rs0_load_wait_Dhl = rs0_en_Dhl && sb_live_rs0_pending_Dhl
+                           && !sb_live_rs0_pipe_Dhl
+                           && ( sb_live_rs0_kind_Dhl  == ghost_sb_kind_load )
+                           && (   ( sb_live_rs0_stage_Dhl == ghost_sb_stage_x0 )
+                               || ( sb_live_rs0_stage_Dhl == ghost_sb_stage_x1 ) );
+  wire sb_rt0_load_wait_Dhl = rt0_en_Dhl && sb_live_rt0_pending_Dhl
+                           && !sb_live_rt0_pipe_Dhl
+                           && ( sb_live_rt0_kind_Dhl  == ghost_sb_kind_load )
+                           && (   ( sb_live_rt0_stage_Dhl == ghost_sb_stage_x0 )
+                               || ( sb_live_rt0_stage_Dhl == ghost_sb_stage_x1 ) );
+  wire sb_rs1_load_wait_Dhl = rs1_en_Dhl && sb_live_rs1_pending_Dhl
+                           && !sb_live_rs1_pipe_Dhl
+                           && ( sb_live_rs1_kind_Dhl  == ghost_sb_kind_load )
+                           && (   ( sb_live_rs1_stage_Dhl == ghost_sb_stage_x0 )
+                               || ( sb_live_rs1_stage_Dhl == ghost_sb_stage_x1 ) );
+  wire sb_rt1_load_wait_Dhl = rt1_en_Dhl && sb_live_rt1_pending_Dhl
+                           && !sb_live_rt1_pipe_Dhl
+                           && ( sb_live_rt1_kind_Dhl  == ghost_sb_kind_load )
+                           && (   ( sb_live_rt1_stage_Dhl == ghost_sb_stage_x0 )
+                               || ( sb_live_rt1_stage_Dhl == ghost_sb_stage_x1 ) );
+
+  wire sb_rs0_muldiv_wait_Dhl = rs0_en_Dhl && sb_live_rs0_pending_Dhl
+                             && !sb_live_rs0_pipe_Dhl
+                             && ( sb_live_rs0_kind_Dhl == ghost_sb_kind_muldiv )
+                             && ( sb_live_rs0_stage_Dhl != ghost_sb_stage_w );
+  wire sb_rt0_muldiv_wait_Dhl = rt0_en_Dhl && sb_live_rt0_pending_Dhl
+                             && !sb_live_rt0_pipe_Dhl
+                             && ( sb_live_rt0_kind_Dhl == ghost_sb_kind_muldiv )
+                             && ( sb_live_rt0_stage_Dhl != ghost_sb_stage_w );
+  wire sb_rs1_muldiv_wait_Dhl = rs1_en_Dhl && sb_live_rs1_pending_Dhl
+                             && !sb_live_rs1_pipe_Dhl
+                             && ( sb_live_rs1_kind_Dhl == ghost_sb_kind_muldiv )
+                             && ( sb_live_rs1_stage_Dhl != ghost_sb_stage_w );
+  wire sb_rt1_muldiv_wait_Dhl = rt1_en_Dhl && sb_live_rt1_pending_Dhl
+                             && !sb_live_rt1_pipe_Dhl
+                             && ( sb_live_rt1_kind_Dhl == ghost_sb_kind_muldiv )
+                             && ( sb_live_rt1_stage_Dhl != ghost_sb_stage_w );
+
+  wire sb_rs0_ready_Dhl = !sb_rs0_load_wait_Dhl && !sb_rs0_muldiv_wait_Dhl;
+  wire sb_rt0_ready_Dhl = !sb_rt0_load_wait_Dhl && !sb_rt0_muldiv_wait_Dhl;
+  wire sb_rs1_ready_Dhl = !sb_rs1_load_wait_Dhl && !sb_rs1_muldiv_wait_Dhl;
+  wire sb_rt1_ready_Dhl = !sb_rt1_load_wait_Dhl && !sb_rt1_muldiv_wait_Dhl;
+
+  wire sb_stall_0_load_use_Dhl   = inst_val_Dhl && ( sb_rs0_load_wait_Dhl   || sb_rt0_load_wait_Dhl );
+  wire sb_stall_1_load_use_Dhl   = inst_val_Dhl && ( sb_rs1_load_wait_Dhl   || sb_rt1_load_wait_Dhl );
+  wire sb_stall_0_muldiv_use_Dhl = inst_val_Dhl && ( sb_rs0_muldiv_wait_Dhl || sb_rt0_muldiv_wait_Dhl );
+  wire sb_stall_1_muldiv_use_Dhl = inst_val_Dhl && ( sb_rs1_muldiv_wait_Dhl || sb_rt1_muldiv_wait_Dhl );
+
+  wire sb_slot0_data_stall_Dhl = inst_val_Dhl && !( sb_rs0_ready_Dhl && sb_rt0_ready_Dhl );
+  wire sb_slot1_data_stall_Dhl = inst_val_Dhl && !( sb_rs1_ready_Dhl && sb_rt1_ready_Dhl );
+  wire sb_data_hazard_stall_Dhl
+    = ( sb_stall_0_muldiv_use_Dhl
+     || sb_stall_1_muldiv_use_Dhl
+     || sb_stall_0_load_use_Dhl
+     || sb_stall_1_load_use_Dhl );
+
+  wire old_data_hazard_stall_Dhl
+    = ( stall_0_muldiv_use_Dhl
+     || stall_1_muldiv_use_Dhl
+     || stall_0_load_use_Dhl
+     || stall_1_load_use_Dhl );
+
+  wire sb_old_stall_0_muldiv_use_mismatch_Dhl = ( sb_stall_0_muldiv_use_Dhl != stall_0_muldiv_use_Dhl );
+  wire sb_old_stall_1_muldiv_use_mismatch_Dhl = ( sb_stall_1_muldiv_use_Dhl != stall_1_muldiv_use_Dhl );
+  wire sb_old_stall_0_load_use_mismatch_Dhl   = ( sb_stall_0_load_use_Dhl   != stall_0_load_use_Dhl );
+  wire sb_old_stall_1_load_use_mismatch_Dhl   = ( sb_stall_1_load_use_Dhl   != stall_1_load_use_Dhl );
+  wire sb_old_data_hazard_stall_mismatch_Dhl  = ( sb_data_hazard_stall_Dhl  != old_data_hazard_stall_Dhl );
+
   // Aggregate Stall Signal
 
   wire ir1_brj_taken_Dhl = (ir1_Dhl ==? `PARC_INST_MSG_JALR) && inst_val_Dhl;
 
   // Real hazard stall -- does not include the narrow PC-context hold
   assign ostall_Dhl = ( stall_X0hl
-                     || stall_0_muldiv_use_Dhl
-                     || stall_1_muldiv_use_Dhl
-                     || stall_1_load_use_Dhl
-                     || stall_0_load_use_Dhl );
+                     || sb_stall_0_muldiv_use_Dhl
+                     || sb_stall_1_muldiv_use_Dhl
+                     || sb_stall_1_load_use_Dhl
+                     || sb_stall_0_load_use_Dhl );
 
   // Track whether the instruction that just entered X0 came from slot 1
   reg slot1_ctrl_in_flight;
