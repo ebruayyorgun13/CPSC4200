@@ -450,22 +450,22 @@ module parc_CoreCtrl
   localparam wm_alu = 1'd0; // Use ALU output
   localparam wm_mem = 1'd1; // Use data memory response
 
-  // Ghost scoreboard metadata encodings
+  // Scoreboard metadata encodings
 
-  localparam ghost_sb_pipe_a    = 1'b0;
-  localparam ghost_sb_pipe_b    = 1'b1;
+  localparam sb_pipe_a    = 1'b0;
+  localparam sb_pipe_b    = 1'b1;
 
-  localparam [2:0] ghost_sb_stage_none = 3'd0;
-  localparam [2:0] ghost_sb_stage_x0   = 3'd1;
-  localparam [2:0] ghost_sb_stage_x1   = 3'd2;
-  localparam [2:0] ghost_sb_stage_x2   = 3'd3;
-  localparam [2:0] ghost_sb_stage_x3   = 3'd4;
-  localparam [2:0] ghost_sb_stage_w    = 3'd5;
+  localparam [2:0] sb_stage_none = 3'd0;
+  localparam [2:0] sb_stage_x0   = 3'd1;
+  localparam [2:0] sb_stage_x1   = 3'd2;
+  localparam [2:0] sb_stage_x2   = 3'd3;
+  localparam [2:0] sb_stage_x3   = 3'd4;
+  localparam [2:0] sb_stage_w    = 3'd5;
 
-  localparam [1:0] ghost_sb_kind_none   = 2'd0;
-  localparam [1:0] ghost_sb_kind_alu    = 2'd1;
-  localparam [1:0] ghost_sb_kind_load   = 2'd2;
-  localparam [1:0] ghost_sb_kind_muldiv = 2'd3;
+  localparam [1:0] sb_kind_none   = 2'd0;
+  localparam [1:0] sb_kind_alu    = 2'd1;
+  localparam [1:0] sb_kind_load   = 2'd2;
+  localparam [1:0] sb_kind_muldiv = 2'd3;
 
   //----------------------------------------------------------------------
   // Decode Stage: Logic
@@ -835,97 +835,97 @@ module parc_CoreCtrl
   wire [3:0] sb_live_opA0_byp_mux_sel_Dhl
     = !sb_live_rs0_pending_Dhl                         ? am_r0
     : !sb_live_rs0_pipe_Dhl
-     && ( sb_live_rs0_stage_Dhl == ghost_sb_stage_x0 ) ? am_AX0_byp
+     && ( sb_live_rs0_stage_Dhl == sb_stage_x0 ) ? am_AX0_byp
     :  sb_live_rs0_pipe_Dhl
-     && ( sb_live_rs0_stage_Dhl == ghost_sb_stage_x0 ) ? am_BX0_byp
+     && ( sb_live_rs0_stage_Dhl == sb_stage_x0 ) ? am_BX0_byp
     : !sb_live_rs0_pipe_Dhl
-     && ( sb_live_rs0_stage_Dhl == ghost_sb_stage_x1 ) ? am_AX1_byp
+     && ( sb_live_rs0_stage_Dhl == sb_stage_x1 ) ? am_AX1_byp
     :  sb_live_rs0_pipe_Dhl
-     && ( sb_live_rs0_stage_Dhl == ghost_sb_stage_x1 ) ? am_BX1_byp
+     && ( sb_live_rs0_stage_Dhl == sb_stage_x1 ) ? am_BX1_byp
     : !sb_live_rs0_pipe_Dhl
-     && ( sb_live_rs0_stage_Dhl == ghost_sb_stage_x2 ) ? am_AX2_byp
+     && ( sb_live_rs0_stage_Dhl == sb_stage_x2 ) ? am_AX2_byp
     :  sb_live_rs0_pipe_Dhl
-     && ( sb_live_rs0_stage_Dhl == ghost_sb_stage_x2 ) ? am_BX2_byp
+     && ( sb_live_rs0_stage_Dhl == sb_stage_x2 ) ? am_BX2_byp
     : !sb_live_rs0_pipe_Dhl
-     && ( sb_live_rs0_stage_Dhl == ghost_sb_stage_x3 ) ? am_AX3_byp
+     && ( sb_live_rs0_stage_Dhl == sb_stage_x3 ) ? am_AX3_byp
     :  sb_live_rs0_pipe_Dhl
-     && ( sb_live_rs0_stage_Dhl == ghost_sb_stage_x3 ) ? am_BX3_byp
+     && ( sb_live_rs0_stage_Dhl == sb_stage_x3 ) ? am_BX3_byp
     : !sb_live_rs0_pipe_Dhl
-     && ( sb_live_rs0_stage_Dhl == ghost_sb_stage_w  ) ? am_AW_byp
+     && ( sb_live_rs0_stage_Dhl == sb_stage_w  ) ? am_AW_byp
     :  sb_live_rs0_pipe_Dhl
-     && ( sb_live_rs0_stage_Dhl == ghost_sb_stage_w  ) ? am_BW_byp
+     && ( sb_live_rs0_stage_Dhl == sb_stage_w  ) ? am_BW_byp
     :                                                    am_r0;
 
   wire [3:0] sb_live_opA1_byp_mux_sel_Dhl
     = !sb_live_rt0_pending_Dhl                         ? bm_r1
     : !sb_live_rt0_pipe_Dhl
-     && ( sb_live_rt0_stage_Dhl == ghost_sb_stage_x0 ) ? bm_AX0_byp
+     && ( sb_live_rt0_stage_Dhl == sb_stage_x0 ) ? bm_AX0_byp
     :  sb_live_rt0_pipe_Dhl
-     && ( sb_live_rt0_stage_Dhl == ghost_sb_stage_x0 ) ? bm_BX0_byp
+     && ( sb_live_rt0_stage_Dhl == sb_stage_x0 ) ? bm_BX0_byp
     : !sb_live_rt0_pipe_Dhl
-     && ( sb_live_rt0_stage_Dhl == ghost_sb_stage_x1 ) ? bm_AX1_byp
+     && ( sb_live_rt0_stage_Dhl == sb_stage_x1 ) ? bm_AX1_byp
     :  sb_live_rt0_pipe_Dhl
-     && ( sb_live_rt0_stage_Dhl == ghost_sb_stage_x1 ) ? bm_BX1_byp
+     && ( sb_live_rt0_stage_Dhl == sb_stage_x1 ) ? bm_BX1_byp
     : !sb_live_rt0_pipe_Dhl
-     && ( sb_live_rt0_stage_Dhl == ghost_sb_stage_x2 ) ? bm_AX2_byp
+     && ( sb_live_rt0_stage_Dhl == sb_stage_x2 ) ? bm_AX2_byp
     :  sb_live_rt0_pipe_Dhl
-     && ( sb_live_rt0_stage_Dhl == ghost_sb_stage_x2 ) ? bm_BX2_byp
+     && ( sb_live_rt0_stage_Dhl == sb_stage_x2 ) ? bm_BX2_byp
     : !sb_live_rt0_pipe_Dhl
-     && ( sb_live_rt0_stage_Dhl == ghost_sb_stage_x3 ) ? bm_AX3_byp
+     && ( sb_live_rt0_stage_Dhl == sb_stage_x3 ) ? bm_AX3_byp
     :  sb_live_rt0_pipe_Dhl
-     && ( sb_live_rt0_stage_Dhl == ghost_sb_stage_x3 ) ? bm_BX3_byp
+     && ( sb_live_rt0_stage_Dhl == sb_stage_x3 ) ? bm_BX3_byp
     : !sb_live_rt0_pipe_Dhl
-     && ( sb_live_rt0_stage_Dhl == ghost_sb_stage_w  ) ? bm_AW_byp
+     && ( sb_live_rt0_stage_Dhl == sb_stage_w  ) ? bm_AW_byp
     :  sb_live_rt0_pipe_Dhl
-     && ( sb_live_rt0_stage_Dhl == ghost_sb_stage_w  ) ? bm_BW_byp
+     && ( sb_live_rt0_stage_Dhl == sb_stage_w  ) ? bm_BW_byp
     :                                                    bm_r1;
 
   wire [3:0] sb_live_opB0_byp_mux_sel_Dhl
     = !sb_live_rs1_pending_Dhl                         ? am_r0
     : !sb_live_rs1_pipe_Dhl
-     && ( sb_live_rs1_stage_Dhl == ghost_sb_stage_x0 ) ? am_AX0_byp
+     && ( sb_live_rs1_stage_Dhl == sb_stage_x0 ) ? am_AX0_byp
     :  sb_live_rs1_pipe_Dhl
-     && ( sb_live_rs1_stage_Dhl == ghost_sb_stage_x0 ) ? am_BX0_byp
+     && ( sb_live_rs1_stage_Dhl == sb_stage_x0 ) ? am_BX0_byp
     : !sb_live_rs1_pipe_Dhl
-     && ( sb_live_rs1_stage_Dhl == ghost_sb_stage_x1 ) ? am_AX1_byp
+     && ( sb_live_rs1_stage_Dhl == sb_stage_x1 ) ? am_AX1_byp
     :  sb_live_rs1_pipe_Dhl
-     && ( sb_live_rs1_stage_Dhl == ghost_sb_stage_x1 ) ? am_BX1_byp
+     && ( sb_live_rs1_stage_Dhl == sb_stage_x1 ) ? am_BX1_byp
     : !sb_live_rs1_pipe_Dhl
-     && ( sb_live_rs1_stage_Dhl == ghost_sb_stage_x2 ) ? am_AX2_byp
+     && ( sb_live_rs1_stage_Dhl == sb_stage_x2 ) ? am_AX2_byp
     :  sb_live_rs1_pipe_Dhl
-     && ( sb_live_rs1_stage_Dhl == ghost_sb_stage_x2 ) ? am_BX2_byp
+     && ( sb_live_rs1_stage_Dhl == sb_stage_x2 ) ? am_BX2_byp
     : !sb_live_rs1_pipe_Dhl
-     && ( sb_live_rs1_stage_Dhl == ghost_sb_stage_x3 ) ? am_AX3_byp
+     && ( sb_live_rs1_stage_Dhl == sb_stage_x3 ) ? am_AX3_byp
     :  sb_live_rs1_pipe_Dhl
-     && ( sb_live_rs1_stage_Dhl == ghost_sb_stage_x3 ) ? am_BX3_byp
+     && ( sb_live_rs1_stage_Dhl == sb_stage_x3 ) ? am_BX3_byp
     : !sb_live_rs1_pipe_Dhl
-     && ( sb_live_rs1_stage_Dhl == ghost_sb_stage_w  ) ? am_AW_byp
+     && ( sb_live_rs1_stage_Dhl == sb_stage_w  ) ? am_AW_byp
     :  sb_live_rs1_pipe_Dhl
-     && ( sb_live_rs1_stage_Dhl == ghost_sb_stage_w  ) ? am_BW_byp
+     && ( sb_live_rs1_stage_Dhl == sb_stage_w  ) ? am_BW_byp
     :                                                    am_r0;
 
   wire [3:0] sb_live_opB1_byp_mux_sel_Dhl
     = !sb_live_rt1_pending_Dhl                         ? bm_r1
     : !sb_live_rt1_pipe_Dhl
-     && ( sb_live_rt1_stage_Dhl == ghost_sb_stage_x0 ) ? bm_AX0_byp
+     && ( sb_live_rt1_stage_Dhl == sb_stage_x0 ) ? bm_AX0_byp
     :  sb_live_rt1_pipe_Dhl
-     && ( sb_live_rt1_stage_Dhl == ghost_sb_stage_x0 ) ? bm_BX0_byp
+     && ( sb_live_rt1_stage_Dhl == sb_stage_x0 ) ? bm_BX0_byp
     : !sb_live_rt1_pipe_Dhl
-     && ( sb_live_rt1_stage_Dhl == ghost_sb_stage_x1 ) ? bm_AX1_byp
+     && ( sb_live_rt1_stage_Dhl == sb_stage_x1 ) ? bm_AX1_byp
     :  sb_live_rt1_pipe_Dhl
-     && ( sb_live_rt1_stage_Dhl == ghost_sb_stage_x1 ) ? bm_BX1_byp
+     && ( sb_live_rt1_stage_Dhl == sb_stage_x1 ) ? bm_BX1_byp
     : !sb_live_rt1_pipe_Dhl
-     && ( sb_live_rt1_stage_Dhl == ghost_sb_stage_x2 ) ? bm_AX2_byp
+     && ( sb_live_rt1_stage_Dhl == sb_stage_x2 ) ? bm_AX2_byp
     :  sb_live_rt1_pipe_Dhl
-     && ( sb_live_rt1_stage_Dhl == ghost_sb_stage_x2 ) ? bm_BX2_byp
+     && ( sb_live_rt1_stage_Dhl == sb_stage_x2 ) ? bm_BX2_byp
     : !sb_live_rt1_pipe_Dhl
-     && ( sb_live_rt1_stage_Dhl == ghost_sb_stage_x3 ) ? bm_AX3_byp
+     && ( sb_live_rt1_stage_Dhl == sb_stage_x3 ) ? bm_AX3_byp
     :  sb_live_rt1_pipe_Dhl
-     && ( sb_live_rt1_stage_Dhl == ghost_sb_stage_x3 ) ? bm_BX3_byp
+     && ( sb_live_rt1_stage_Dhl == sb_stage_x3 ) ? bm_BX3_byp
     : !sb_live_rt1_pipe_Dhl
-     && ( sb_live_rt1_stage_Dhl == ghost_sb_stage_w  ) ? bm_AW_byp
+     && ( sb_live_rt1_stage_Dhl == sb_stage_w  ) ? bm_AW_byp
     :  sb_live_rt1_pipe_Dhl
-     && ( sb_live_rt1_stage_Dhl == ghost_sb_stage_w  ) ? bm_BW_byp
+     && ( sb_live_rt1_stage_Dhl == sb_stage_w  ) ? bm_BW_byp
     :                                                    bm_r1;
 
   assign opA0_byp_mux_sel_Dhl = sb_live_opA0_byp_mux_sel_Dhl;
@@ -1016,41 +1016,41 @@ module parc_CoreCtrl
 
   wire sb_rs0_load_wait_Dhl = rs0_en_Dhl && sb_live_rs0_pending_Dhl
                            && !sb_live_rs0_pipe_Dhl
-                           && ( sb_live_rs0_kind_Dhl  == ghost_sb_kind_load )
-                           && (   ( sb_live_rs0_stage_Dhl == ghost_sb_stage_x0 )
-                               || ( sb_live_rs0_stage_Dhl == ghost_sb_stage_x1 ) );
+                           && ( sb_live_rs0_kind_Dhl  == sb_kind_load )
+                           && (   ( sb_live_rs0_stage_Dhl == sb_stage_x0 )
+                               || ( sb_live_rs0_stage_Dhl == sb_stage_x1 ) );
   wire sb_rt0_load_wait_Dhl = rt0_en_Dhl && sb_live_rt0_pending_Dhl
                            && !sb_live_rt0_pipe_Dhl
-                           && ( sb_live_rt0_kind_Dhl  == ghost_sb_kind_load )
-                           && (   ( sb_live_rt0_stage_Dhl == ghost_sb_stage_x0 )
-                               || ( sb_live_rt0_stage_Dhl == ghost_sb_stage_x1 ) );
+                           && ( sb_live_rt0_kind_Dhl  == sb_kind_load )
+                           && (   ( sb_live_rt0_stage_Dhl == sb_stage_x0 )
+                               || ( sb_live_rt0_stage_Dhl == sb_stage_x1 ) );
   wire sb_rs1_load_wait_Dhl = rs1_en_Dhl && sb_live_rs1_pending_Dhl
                            && !sb_live_rs1_pipe_Dhl
-                           && ( sb_live_rs1_kind_Dhl  == ghost_sb_kind_load )
-                           && (   ( sb_live_rs1_stage_Dhl == ghost_sb_stage_x0 )
-                               || ( sb_live_rs1_stage_Dhl == ghost_sb_stage_x1 ) );
+                           && ( sb_live_rs1_kind_Dhl  == sb_kind_load )
+                           && (   ( sb_live_rs1_stage_Dhl == sb_stage_x0 )
+                               || ( sb_live_rs1_stage_Dhl == sb_stage_x1 ) );
   wire sb_rt1_load_wait_Dhl = rt1_en_Dhl && sb_live_rt1_pending_Dhl
                            && !sb_live_rt1_pipe_Dhl
-                           && ( sb_live_rt1_kind_Dhl  == ghost_sb_kind_load )
-                           && (   ( sb_live_rt1_stage_Dhl == ghost_sb_stage_x0 )
-                               || ( sb_live_rt1_stage_Dhl == ghost_sb_stage_x1 ) );
+                           && ( sb_live_rt1_kind_Dhl  == sb_kind_load )
+                           && (   ( sb_live_rt1_stage_Dhl == sb_stage_x0 )
+                               || ( sb_live_rt1_stage_Dhl == sb_stage_x1 ) );
 
   wire sb_rs0_muldiv_wait_Dhl = rs0_en_Dhl && sb_live_rs0_pending_Dhl
                              && !sb_live_rs0_pipe_Dhl
-                             && ( sb_live_rs0_kind_Dhl == ghost_sb_kind_muldiv )
-                             && ( sb_live_rs0_stage_Dhl != ghost_sb_stage_w );
+                             && ( sb_live_rs0_kind_Dhl == sb_kind_muldiv )
+                             && ( sb_live_rs0_stage_Dhl != sb_stage_w );
   wire sb_rt0_muldiv_wait_Dhl = rt0_en_Dhl && sb_live_rt0_pending_Dhl
                              && !sb_live_rt0_pipe_Dhl
-                             && ( sb_live_rt0_kind_Dhl == ghost_sb_kind_muldiv )
-                             && ( sb_live_rt0_stage_Dhl != ghost_sb_stage_w );
+                             && ( sb_live_rt0_kind_Dhl == sb_kind_muldiv )
+                             && ( sb_live_rt0_stage_Dhl != sb_stage_w );
   wire sb_rs1_muldiv_wait_Dhl = rs1_en_Dhl && sb_live_rs1_pending_Dhl
                              && !sb_live_rs1_pipe_Dhl
-                             && ( sb_live_rs1_kind_Dhl == ghost_sb_kind_muldiv )
-                             && ( sb_live_rs1_stage_Dhl != ghost_sb_stage_w );
+                             && ( sb_live_rs1_kind_Dhl == sb_kind_muldiv )
+                             && ( sb_live_rs1_stage_Dhl != sb_stage_w );
   wire sb_rt1_muldiv_wait_Dhl = rt1_en_Dhl && sb_live_rt1_pending_Dhl
                              && !sb_live_rt1_pipe_Dhl
-                             && ( sb_live_rt1_kind_Dhl == ghost_sb_kind_muldiv )
-                             && ( sb_live_rt1_stage_Dhl != ghost_sb_stage_w );
+                             && ( sb_live_rt1_kind_Dhl == sb_kind_muldiv )
+                             && ( sb_live_rt1_stage_Dhl != sb_stage_w );
 
   wire sb_rs0_ready_Dhl = !sb_rs0_load_wait_Dhl && !sb_rs0_muldiv_wait_Dhl;
   wire sb_rt0_ready_Dhl = !sb_rt0_load_wait_Dhl && !sb_rt0_muldiv_wait_Dhl;
@@ -1551,91 +1551,91 @@ module parc_CoreCtrl
   wire ghost_sb_wa_v  = inst_val_Whl  && rfA_wen_Whl  && ( rfA_waddr_Whl  != 5'd0 );
   wire ghost_sb_wb_v  = inst_val_Whl  && rfB_wen_Whl  && ( rfB_waddr_Whl  != 5'd0 );
 
-  wire [1:0] ghost_sb_x0a_kind = is_muldiv_X0hl ? ghost_sb_kind_muldiv
-                              : is_load_X0hl    ? ghost_sb_kind_load
-                              :                   ghost_sb_kind_alu;
-  wire [1:0] ghost_sb_x1a_kind = is_muldiv_X1hl ? ghost_sb_kind_muldiv
-                              : is_load_X1hl    ? ghost_sb_kind_load
-                              :                   ghost_sb_kind_alu;
-  wire [1:0] ghost_sb_x2a_kind = is_muldiv_X2hl ? ghost_sb_kind_muldiv
-                              :                   ghost_sb_kind_alu;
-  wire [1:0] ghost_sb_x3a_kind = is_muldiv_X3hl ? ghost_sb_kind_muldiv
-                              :                   ghost_sb_kind_alu;
-  wire [1:0] ghost_sb_wa_kind  = ghost_sb_kind_alu;
+  wire [1:0] ghost_sb_x0a_kind = is_muldiv_X0hl ? sb_kind_muldiv
+                              : is_load_X0hl    ? sb_kind_load
+                              :                   sb_kind_alu;
+  wire [1:0] ghost_sb_x1a_kind = is_muldiv_X1hl ? sb_kind_muldiv
+                              : is_load_X1hl    ? sb_kind_load
+                              :                   sb_kind_alu;
+  wire [1:0] ghost_sb_x2a_kind = is_muldiv_X2hl ? sb_kind_muldiv
+                              :                   sb_kind_alu;
+  wire [1:0] ghost_sb_x3a_kind = is_muldiv_X3hl ? sb_kind_muldiv
+                              :                   sb_kind_alu;
+  wire [1:0] ghost_sb_wa_kind  = sb_kind_alu;
 
   always @(*) begin
     for ( ghost_sb_idx = 0; ghost_sb_idx < 32; ghost_sb_idx = ghost_sb_idx + 1 ) begin
       sb_live_pending[ghost_sb_idx] = 1'b0;
-      sb_live_pipe[ghost_sb_idx]    = ghost_sb_pipe_a;
-      sb_live_stage[ghost_sb_idx]   = ghost_sb_stage_none;
-      sb_live_kind[ghost_sb_idx]    = ghost_sb_kind_none;
+      sb_live_pipe[ghost_sb_idx]    = sb_pipe_a;
+      sb_live_stage[ghost_sb_idx]   = sb_stage_none;
+      sb_live_kind[ghost_sb_idx]    = sb_kind_none;
     end
 
     // Oldest-to-youngest overwrite order across the currently in-flight
     // machine state: W -> X3 -> X2 -> X1 -> X0
     if ( ghost_sb_wa_v ) begin
       sb_live_pending[rfA_waddr_Whl] = 1'b1;
-      sb_live_pipe[rfA_waddr_Whl]    = ghost_sb_pipe_a;
-      sb_live_stage[rfA_waddr_Whl]   = ghost_sb_stage_w;
+      sb_live_pipe[rfA_waddr_Whl]    = sb_pipe_a;
+      sb_live_stage[rfA_waddr_Whl]   = sb_stage_w;
       sb_live_kind[rfA_waddr_Whl]    = ghost_sb_wa_kind;
     end
     if ( ghost_sb_wb_v ) begin
       sb_live_pending[rfB_waddr_Whl] = 1'b1;
-      sb_live_pipe[rfB_waddr_Whl]    = ghost_sb_pipe_b;
-      sb_live_stage[rfB_waddr_Whl]   = ghost_sb_stage_w;
-      sb_live_kind[rfB_waddr_Whl]    = ghost_sb_kind_alu;
+      sb_live_pipe[rfB_waddr_Whl]    = sb_pipe_b;
+      sb_live_stage[rfB_waddr_Whl]   = sb_stage_w;
+      sb_live_kind[rfB_waddr_Whl]    = sb_kind_alu;
     end
 
     if ( ghost_sb_x3a_v ) begin
       sb_live_pending[rfA_waddr_X3hl] = 1'b1;
-      sb_live_pipe[rfA_waddr_X3hl]    = ghost_sb_pipe_a;
-      sb_live_stage[rfA_waddr_X3hl]   = ghost_sb_stage_x3;
+      sb_live_pipe[rfA_waddr_X3hl]    = sb_pipe_a;
+      sb_live_stage[rfA_waddr_X3hl]   = sb_stage_x3;
       sb_live_kind[rfA_waddr_X3hl]    = ghost_sb_x3a_kind;
     end
     if ( ghost_sb_x3b_v ) begin
       sb_live_pending[rfB_waddr_X3hl] = 1'b1;
-      sb_live_pipe[rfB_waddr_X3hl]    = ghost_sb_pipe_b;
-      sb_live_stage[rfB_waddr_X3hl]   = ghost_sb_stage_x3;
-      sb_live_kind[rfB_waddr_X3hl]    = ghost_sb_kind_alu;
+      sb_live_pipe[rfB_waddr_X3hl]    = sb_pipe_b;
+      sb_live_stage[rfB_waddr_X3hl]   = sb_stage_x3;
+      sb_live_kind[rfB_waddr_X3hl]    = sb_kind_alu;
     end
 
     if ( ghost_sb_x2a_v ) begin
       sb_live_pending[rfA_waddr_X2hl] = 1'b1;
-      sb_live_pipe[rfA_waddr_X2hl]    = ghost_sb_pipe_a;
-      sb_live_stage[rfA_waddr_X2hl]   = ghost_sb_stage_x2;
+      sb_live_pipe[rfA_waddr_X2hl]    = sb_pipe_a;
+      sb_live_stage[rfA_waddr_X2hl]   = sb_stage_x2;
       sb_live_kind[rfA_waddr_X2hl]    = ghost_sb_x2a_kind;
     end
     if ( ghost_sb_x2b_v ) begin
       sb_live_pending[rfB_waddr_X2hl] = 1'b1;
-      sb_live_pipe[rfB_waddr_X2hl]    = ghost_sb_pipe_b;
-      sb_live_stage[rfB_waddr_X2hl]   = ghost_sb_stage_x2;
-      sb_live_kind[rfB_waddr_X2hl]    = ghost_sb_kind_alu;
+      sb_live_pipe[rfB_waddr_X2hl]    = sb_pipe_b;
+      sb_live_stage[rfB_waddr_X2hl]   = sb_stage_x2;
+      sb_live_kind[rfB_waddr_X2hl]    = sb_kind_alu;
     end
 
     if ( ghost_sb_x1a_v ) begin
       sb_live_pending[rfA_waddr_X1hl] = 1'b1;
-      sb_live_pipe[rfA_waddr_X1hl]    = ghost_sb_pipe_a;
-      sb_live_stage[rfA_waddr_X1hl]   = ghost_sb_stage_x1;
+      sb_live_pipe[rfA_waddr_X1hl]    = sb_pipe_a;
+      sb_live_stage[rfA_waddr_X1hl]   = sb_stage_x1;
       sb_live_kind[rfA_waddr_X1hl]    = ghost_sb_x1a_kind;
     end
     if ( ghost_sb_x1b_v ) begin
       sb_live_pending[rfB_waddr_X1hl] = 1'b1;
-      sb_live_pipe[rfB_waddr_X1hl]    = ghost_sb_pipe_b;
-      sb_live_stage[rfB_waddr_X1hl]   = ghost_sb_stage_x1;
-      sb_live_kind[rfB_waddr_X1hl]    = ghost_sb_kind_alu;
+      sb_live_pipe[rfB_waddr_X1hl]    = sb_pipe_b;
+      sb_live_stage[rfB_waddr_X1hl]   = sb_stage_x1;
+      sb_live_kind[rfB_waddr_X1hl]    = sb_kind_alu;
     end
 
     if ( ghost_sb_x0a_v ) begin
       sb_live_pending[rfA_waddr_X0hl] = 1'b1;
-      sb_live_pipe[rfA_waddr_X0hl]    = ghost_sb_pipe_a;
-      sb_live_stage[rfA_waddr_X0hl]   = ghost_sb_stage_x0;
+      sb_live_pipe[rfA_waddr_X0hl]    = sb_pipe_a;
+      sb_live_stage[rfA_waddr_X0hl]   = sb_stage_x0;
       sb_live_kind[rfA_waddr_X0hl]    = ghost_sb_x0a_kind;
     end
     if ( ghost_sb_x0b_v ) begin
       sb_live_pending[rfB_waddr_X0hl] = 1'b1;
-      sb_live_pipe[rfB_waddr_X0hl]    = ghost_sb_pipe_b;
-      sb_live_stage[rfB_waddr_X0hl]   = ghost_sb_stage_x0;
-      sb_live_kind[rfB_waddr_X0hl]    = ghost_sb_kind_alu;
+      sb_live_pipe[rfB_waddr_X0hl]    = sb_pipe_b;
+      sb_live_stage[rfB_waddr_X0hl]   = sb_stage_x0;
+      sb_live_kind[rfB_waddr_X0hl]    = sb_kind_alu;
     end
   end
 
