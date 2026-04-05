@@ -219,10 +219,55 @@ module parc_CoreCtrl
     : ( imemresp1_queue_val_Fhl )  ? imemresp1_queue_reg_Fhl
     :                               32'bx;
 
-  // only hand a new pair to decode when both instructions are available, either directly from imem or from the response queue
+  // Decode consumes mux-selected frontend payloads, so pair-valid must be
+  // aligned with those same payloads.
+
+  wire        imemresp0_mux_val_Fhl = imemresp0_queue_val_Fhl || imemresp0_val;
+  wire        imemresp1_mux_val_Fhl = imemresp1_queue_val_Fhl || imemresp1_val;
+  wire [31:0] imemresp0_mux_out_Fhl = imemresp0_queue_mux_out_Fhl;
+
+  // Detect unconditional redirects directly from the fetched instruction
+  // bits so slot 1 can be sanitized before decode sees it.
+  wire [5:0] fetched_slot0_opcode_Fhl = imemresp0_mux_out_Fhl[`PARC_INST_MSG_OPCODE];
+  wire [4:0] fetched_slot0_rt_Fhl     = imemresp0_mux_out_Fhl[`PARC_INST_MSG_RT];
+  wire [4:0] fetched_slot0_rd_Fhl     = imemresp0_mux_out_Fhl[`PARC_INST_MSG_RD];
+  wire [4:0] fetched_slot0_shamt_Fhl  = imemresp0_mux_out_Fhl[`PARC_INST_MSG_SHAMT];
+  wire [5:0] fetched_slot0_func_Fhl   = imemresp0_mux_out_Fhl[`PARC_INST_MSG_FUNC];
+
+  wire fetched_slot0_is_j_Fhl
+    = ( fetched_slot0_opcode_Fhl == 6'b000010 );
+
+  wire fetched_slot0_is_jal_Fhl
+    = ( fetched_slot0_opcode_Fhl == 6'b000011 );
+
+  wire fetched_slot0_is_jr_Fhl
+    = ( fetched_slot0_opcode_Fhl == 6'b000000 )
+   && ( fetched_slot0_rt_Fhl     == 5'b00000  )
+   && ( fetched_slot0_rd_Fhl     == 5'b00000  )
+   && ( fetched_slot0_shamt_Fhl  == 5'b00000  )
+   && ( fetched_slot0_func_Fhl   == 6'b001000 );
+
+  wire fetched_slot0_is_jalr_Fhl
+    = ( fetched_slot0_opcode_Fhl == 6'b000000 )
+   && ( fetched_slot0_rt_Fhl     == 5'b00000  )
+   && ( fetched_slot0_shamt_Fhl  == 5'b00000  )
+   && ( fetched_slot0_func_Fhl   == 6'b001001 );
+
+  wire fetched_slot0_redirect_Fhl
+    = fetched_slot0_is_j_Fhl
+   || fetched_slot0_is_jal_Fhl
+   || fetched_slot0_is_jr_Fhl
+   || fetched_slot0_is_jalr_Fhl;
+
+  wire [31:0] imemresp1_mux_out_Fhl
+    = fetched_slot0_redirect_Fhl ? `PARC_INST_MSG_NOP
+    :                              imemresp1_queue_mux_out_Fhl;
+
+  // Only hand a new pair to decode when the exact payloads decode will
+  // consume are available.
   wire imem_pair_val_Fhl
-    = ( imemresp0_val || imemresp0_queue_val_Fhl )
-   && ( imemresp1_val || imemresp1_queue_val_Fhl );
+    = imemresp0_mux_val_Fhl
+   && ( fetched_slot0_redirect_Fhl || imemresp1_mux_val_Fhl );
 
   //----------------------------------------------------------------------
   // D <- F
@@ -256,8 +301,8 @@ module parc_CoreCtrl
       ir0_Dhl    <= `PARC_INST_MSG_NOP;
     end
     else if( !ostall_Dhl && ready_for_next && imem_pair_val_Fhl ) begin
-      ir0_Dhl    <= imemresp0_queue_mux_out_Fhl;
-      ir1_Dhl    <= imemresp1_queue_mux_out_Fhl;
+      ir0_Dhl    <= imemresp0_mux_out_Fhl;
+      ir1_Dhl    <= imemresp1_mux_out_Fhl;
       bubble_Dhl <= bubble_next_Fhl;
     end
   end
@@ -633,7 +678,19 @@ module parc_CoreCtrl
 
   wire need_stall = inst_val_Dhl && (both_not_alu || has_hazard);
 
-  wire ready_for_next = (steering_mux_sel && !need_stall) || !steering_mux_sel;
+  // Serialize slot 1 when slot 0 is unresolved control-flow. We exclude
+  // j/jal because fetched slot 1 is already sanitized in the frontend.
+  wire slot0_unresolved_ctrl = inst_val_Dhl
+                            && ( ( cs0[`PARC_INST_MSG_BR_SEL] != br_none )
+                              || ( cs0[`PARC_INST_MSG_J_EN]
+                                && ( cs0[`PARC_INST_MSG_PC_SEL] == pm_r ) ) );
+
+  wire serialize_slot1_Dhl = inst_val_Dhl
+                          && ( both_not_alu
+                            || has_hazard
+                            || slot0_unresolved_ctrl );
+
+  wire ready_for_next = (steering_mux_sel && !serialize_slot1_Dhl) || !steering_mux_sel;
 
   reg steering_mux_sel;
 
@@ -645,7 +702,7 @@ module parc_CoreCtrl
     end
     else if (!ostall_Dhl || ((!steering_mux_sel && ir1_brj_taken_Dhl))) begin
       if (steering_mux_sel == 1'b1 && inst_val_Dhl) begin
-        if (!need_stall)
+        if (!serialize_slot1_Dhl)
           steering_mux_sel <= 1'b1; 
         else
           steering_mux_sel <= 1'b0; 
@@ -666,7 +723,7 @@ module parc_CoreCtrl
     instB_Dhl = 32'b0;
     pipeA_cs   = nop_cs;
     pipeB_cs = nop_cs;
-    if (both_not_alu || has_hazard) begin
+    if (serialize_slot1_Dhl) begin
       if ( steering_mux_sel == 1'b1 ) begin
         instA_Dhl = ir0_Dhl;
         pipeA_cs   = cs0;
@@ -1237,7 +1294,8 @@ module parc_CoreCtrl
 
   // Muldiv request
 
-  assign muldivreq_val = muldivreq_val_Dhl && inst_val_Dhl;
+  wire muldiv_issue_X0_Dhl = muldivreq_val_Dhl && inst_val_Dhl && !stall_X0hl;
+  assign muldivreq_val = muldiv_issue_X0_Dhl;
   assign muldivresp_rdy = 1'b1;
   assign muldiv_stall_mult1 = stall_X1hl;
 
@@ -1732,7 +1790,7 @@ module parc_CoreCtrl
   reg [31:0] num_inst    = 32'b0;
   reg [31:0] num_cycles  = 32'b0;
   reg        stats_en    = 1'b0; // Used for enabling stats on asm tests
-  wire       dual_issue_Dhl = inst_val_Dhl && steering_mux_sel && !need_stall;
+  wire       dual_issue_Dhl = inst_val_Dhl && steering_mux_sel && !serialize_slot1_Dhl;
 
   always @( posedge clk ) begin
     if ( !reset ) begin
