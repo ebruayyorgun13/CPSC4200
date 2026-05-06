@@ -39,5 +39,8 @@ parcv2_srcs += \
   parcv2-rem.S \
   parcv2-remu.S \
   parcv2-ooo.S \
+  parcv2-oooByp.S \
+  parcv2-waw.S \
+  parcv2-timing.S \
 #  parcv2-mfc0.S \
 

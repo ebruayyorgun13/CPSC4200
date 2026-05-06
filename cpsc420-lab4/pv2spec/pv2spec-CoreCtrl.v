@@ -537,6 +537,8 @@ module parc_CoreCtrl
   // wire [1:0] wb_mux_sel_Whl; (declared as output)
 
   wire [3:0] rob_fill_slot_Dhl;
+  wire [3:0] rob_commit_slot_sb;
+  wire       rob_commit_wen_sb;
 
   // wire [3:0] op0_byp_rob_slot_Dhl; (declared as output)
   // wire [3:0] op1_byp_rob_slot_Dhl; (declared as output)
@@ -557,8 +559,8 @@ module parc_CoreCtrl
     .non_sb_stall_Dhl    (non_sb_stall_Dhl),
 
     .rob_alloc_slot      (rob_fill_slot_Dhl),
-    .rob_commit_slot     (rob_commit_slot_Chl),
-    .rob_commit_wen      (rob_commit_wen_Chl),
+    .rob_commit_slot     (rob_commit_slot_sb),
+    .rob_commit_wen      (rob_commit_wen_sb),
 
     .stalls              (stalls_combined),
 
@@ -583,10 +585,9 @@ module parc_CoreCtrl
 
   // Aggregate Stall Signal
 
-  wire stall_spec_Dhl = inst_val_Ihl && (br_sel_Ihl != br_none);
+  //wire stall_spec_Dhl = inst_val_Ihl && (br_sel_Ihl != br_none);
 
   assign non_sb_stall_Dhl = ( stall_Ihl ||
-                       stall_spec_Dhl ||
                       (inst_val_Dhl && !rob_req_rdy_Dhl));
 
   assign stall_Dhl = non_sb_stall_Dhl || (inst_val_Dhl && stall_sb_Dhl );
@@ -658,9 +659,9 @@ module parc_CoreCtrl
 
   wire inst_val_Ihl = ( !bubble_Ihl && !squash_Ihl );
 
-  // Dummy squash signal
+  // Squash instruction in I if a valid branch in X is taken
 
-  wire squash_Ihl = 1'b0;
+  wire squash_Ihl = inst_val_Xhl && brj_taken_Xhl;
 
   // Stall Signal
 
@@ -701,6 +702,8 @@ module parc_CoreCtrl
 
   always @ ( posedge clk ) begin
     if ( reset ) begin
+      br_sel_Xhl <= br_none;
+
       bubble_Xhl <= 1'b1;
     end
     else if( !stall_Xhl ) begin
@@ -717,7 +720,7 @@ module parc_CoreCtrl
       dmemresp_mux_sel_Xhl <= dmemresp_mux_sel_Ihl;
       wb_mux_sel_Xhl       <= wb_mux_sel_Ihl;
       rf_waddr_Xhl         <= rf_waddr_Ihl;
-      rf_wen_Xhl           <= rf_wen_Ihl;
+      rf_wen_Xhl           <= rf_wen_Ihl && !bubble_next_Ihl;
       rob_fill_slot_Xhl    <= rob_fill_slot_Ihl;
       cp0_wen_Xhl          <= cp0_wen_Ihl;
       cp0_addr_Xhl         <= cp0_addr_Ihl;
@@ -1042,6 +1045,22 @@ module parc_CoreCtrl
 
   wire rob_req_rdy_Dhl;
 
+  wire rob_alloc_req_spec_Dhl =
+    (inst_val_Ihl && (br_sel_Ihl != br_none))
+ || (inst_val_Xhl && (br_sel_Xhl != br_none));
+  wire rob_brj_resolved_Xhl = inst_val_Xhl && (br_sel_Xhl != br_none);
+  wire rob_brj_mispredicted_Xhl = rob_brj_resolved_Xhl && brj_taken_Xhl;
+
+  // Branches do not allocate ROB entries here, so roll back to the first
+  // speculative slot and clear that slot from the scoreboard on a squash.
+  wire [3:0] rob_brj_slot_Xhl = rob_fill_slot_Ihl;
+  wire rob_sb_squash_wen_Xhl = rob_brj_mispredicted_Xhl && !bubble_Ihl;
+  wire [3:0] rob_sb_squash_slot_Xhl = rob_fill_slot_Ihl;
+
+  assign rob_commit_wen_sb = rob_sb_squash_wen_Xhl || rob_commit_wen_Chl;
+  assign rob_commit_slot_sb =
+    rob_sb_squash_wen_Xhl ? rob_sb_squash_slot_Xhl : rob_commit_slot_Chl;
+
   assign rob_fill_wen_Whl = inst_val_Whl && rf_wen_Whl;
 
   // wire [3:0] rob_commit_slot_Chl; (declared as output)
@@ -1055,9 +1074,13 @@ module parc_CoreCtrl
     .rob_alloc_req_val         (rob_req_val_Dhl),
     .rob_alloc_req_rdy         (rob_req_rdy_Dhl),
     .rob_alloc_req_preg        (rf_waddr_Dhl),
+    .rob_alloc_req_spec        (rob_alloc_req_spec_Dhl),
     .rob_alloc_resp_slot       (rob_fill_slot_Dhl),
     .rob_fill_val              (rob_fill_wen_Whl),
     .rob_fill_slot             (rob_fill_slot_Whl),
+    .rob_brj_resolved          (rob_brj_resolved_Xhl),
+    .rob_brj_mispredicted      (rob_brj_mispredicted_Xhl),
+    .rob_brj_slot              (rob_brj_slot_Xhl),
     .rob_commit_slot           (rob_commit_slot_Chl),
     .rob_commit_wen            (rob_commit_wen_Chl),
     .rob_commit_rf_waddr       (rob_commit_waddr_Chl)
@@ -1171,7 +1194,7 @@ module parc_CoreCtrl
 
         // Count instructions for every cycle not squashed or stalled
 
-        if ( inst_val_Dhl && !stall_Dhl ) begin
+        if ( inst_val_Xhl && !stall_Xhl ) begin
           num_inst = num_inst + 1;
         end
 
@@ -1185,4 +1208,3 @@ module parc_CoreCtrl
 endmodule
 
 `endif
-
